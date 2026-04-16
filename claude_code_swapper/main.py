@@ -84,5 +84,18 @@ def select_provider_and_model(
     return provider, model
 
 
+def launch_claude(provider_config: dict, model: str) -> None:
+    if shutil.which("claude") is None:
+        print("Error: 'claude' not found in PATH — is Claude Code installed?")
+        sys.exit(1)
+
+    env = os.environ.copy()
+    env["ANTHROPIC_API_KEY"] = provider_config["api_key"]
+    env["ANTHROPIC_BASE_URL"] = provider_config["base_url"]
+
+    print(f"Launching claude with model {model}...")
+    os.execvpe("claude", ["claude", "--model", model], env)
+
+
 def main() -> None:
     pass

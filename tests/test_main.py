@@ -170,3 +170,65 @@ class TestSelectProviderAndModel:
             )
             provider_call_kwargs = mock_select.call_args_list[0][1]
         assert provider_call_kwargs["default"] is None
+
+
+from claude_code_swapper.main import launch_claude
+
+
+class TestLaunchClaude:
+    def test_execs_claude_with_model_flag(self):
+        provider_config = {
+            "api_key": "sk-test",
+            "base_url": "https://openrouter.ai/api/v1",
+        }
+        with patch("shutil.which", return_value="/usr/bin/claude"), patch(
+            "os.execvpe"
+        ) as mock_exec:
+            launch_claude(provider_config, "anthropic/claude-sonnet-4-6")
+        args = mock_exec.call_args[0]
+        assert args[0] == "claude"
+        assert args[1] == ["claude", "--model", "anthropic/claude-sonnet-4-6"]
+
+    def test_injects_api_key_env_var(self):
+        provider_config = {
+            "api_key": "sk-test",
+            "base_url": "https://openrouter.ai/api/v1",
+        }
+        with patch("shutil.which", return_value="/usr/bin/claude"), patch(
+            "os.execvpe"
+        ) as mock_exec:
+            launch_claude(provider_config, "some-model")
+        env = mock_exec.call_args[0][2]
+        assert env["ANTHROPIC_API_KEY"] == "sk-test"
+
+    def test_injects_base_url_env_var(self):
+        provider_config = {
+            "api_key": "sk-test",
+            "base_url": "https://openrouter.ai/api/v1",
+        }
+        with patch("shutil.which", return_value="/usr/bin/claude"), patch(
+            "os.execvpe"
+        ) as mock_exec:
+            launch_claude(provider_config, "some-model")
+        env = mock_exec.call_args[0][2]
+        assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api/v1"
+
+    def test_preserves_existing_env_vars(self):
+        provider_config = {
+            "api_key": "sk-test",
+            "base_url": "https://example.com",
+        }
+        with patch("shutil.which", return_value="/usr/bin/claude"), patch(
+            "os.execvpe"
+        ) as mock_exec, patch.dict(os.environ, {"MY_VAR": "my-value"}):
+            launch_claude(provider_config, "model")
+        env = mock_exec.call_args[0][2]
+        assert env["MY_VAR"] == "my-value"
+
+    def test_exits_when_claude_not_found(self, capsys):
+        with patch("shutil.which", return_value=None), pytest.raises(
+            SystemExit
+        ) as exc:
+            launch_claude({"api_key": "k", "base_url": "u"}, "model")
+        assert exc.value.code == 1
+        assert "claude" in capsys.readouterr().out.lower()
