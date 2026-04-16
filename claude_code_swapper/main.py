@@ -45,5 +45,44 @@ def save_last(provider: str, model: str, last_path: Path = LAST_PATH) -> None:
         yaml.dump({"provider": provider, "model": model}, f)
 
 
+def select_provider_and_model(
+    config: dict,
+    last_provider: str | None = None,
+    last_model: str | None = None,
+) -> tuple[str, str]:
+    providers = [
+        p
+        for p, v in config.get("providers", {}).items()
+        if v.get("models")
+    ]
+    if not providers:
+        print("No providers with models configured.")
+        print("Edit ~/.config/claude-code-swapper/config.yaml to add providers.")
+        sys.exit(1)
+
+    default_provider = last_provider if last_provider in providers else None
+    provider = questionary.select(
+        "Select a provider:",
+        choices=providers,
+        default=default_provider,
+    ).ask()
+
+    if provider is None:
+        sys.exit(0)
+
+    models = config["providers"][provider]["models"]
+    default_model = last_model if last_model in models else None
+    model = questionary.select(
+        "Select a model:",
+        choices=models,
+        default=default_model,
+    ).ask()
+
+    if model is None:
+        sys.exit(0)
+
+    return provider, model
+
+
 def main() -> None:
     pass

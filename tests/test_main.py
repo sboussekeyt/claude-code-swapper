@@ -4,7 +4,7 @@ import yaml
 from pathlib import Path
 from unittest.mock import patch
 
-from claude_code_swapper.main import load_config, load_last, save_last
+from claude_code_swapper.main import load_config, load_last, save_last, select_provider_and_model
 
 SAMPLE_CONFIG = {
     "providers": {
@@ -94,3 +94,79 @@ class TestSaveLast:
         last_file = tmp_path / "nested" / "dir" / "last.yaml"
         save_last("openrouter", "model", last_path=last_file)
         assert last_file.exists()
+
+
+class TestSelectProviderAndModel:
+    def test_selects_provider_and_model(self):
+        with patch("questionary.select") as mock_select:
+            mock_select.return_value.ask.side_effect = [
+                "openrouter",
+                "meta-llama/llama-3.1-8b",
+            ]
+            provider, model = select_provider_and_model(SAMPLE_CONFIG)
+        assert provider == "openrouter"
+        assert model == "meta-llama/llama-3.1-8b"
+
+    def test_excludes_providers_with_no_models(self):
+        with patch("questionary.select") as mock_select:
+            mock_select.return_value.ask.side_effect = [
+                "openrouter",
+                "anthropic/claude-sonnet-4-6",
+            ]
+            select_provider_and_model(SAMPLE_CONFIG)
+            choices = mock_select.call_args_list[0][1]["choices"]
+        assert "empty_provider" not in choices
+
+    def test_preselects_last_provider(self):
+        with patch("questionary.select") as mock_select:
+            mock_select.return_value.ask.side_effect = ["anthropic", "claude-opus-4-6"]
+            select_provider_and_model(
+                SAMPLE_CONFIG, last_provider="anthropic", last_model="claude-opus-4-6"
+            )
+            provider_call_kwargs = mock_select.call_args_list[0][1]
+        assert provider_call_kwargs["default"] == "anthropic"
+
+    def test_preselects_last_model(self):
+        with patch("questionary.select") as mock_select:
+            mock_select.return_value.ask.side_effect = [
+                "openrouter",
+                "meta-llama/llama-3.1-8b",
+            ]
+            select_provider_and_model(
+                SAMPLE_CONFIG,
+                last_provider="openrouter",
+                last_model="meta-llama/llama-3.1-8b",
+            )
+            model_call_kwargs = mock_select.call_args_list[1][1]
+        assert model_call_kwargs["default"] == "meta-llama/llama-3.1-8b"
+
+    def test_exits_zero_when_user_cancels_provider(self):
+        with patch("questionary.select") as mock_select:
+            mock_select.return_value.ask.return_value = None
+            with pytest.raises(SystemExit) as exc:
+                select_provider_and_model(SAMPLE_CONFIG)
+        assert exc.value.code == 0
+
+    def test_exits_zero_when_user_cancels_model(self):
+        with patch("questionary.select") as mock_select:
+            mock_select.return_value.ask.side_effect = ["openrouter", None]
+            with pytest.raises(SystemExit) as exc:
+                select_provider_and_model(SAMPLE_CONFIG)
+        assert exc.value.code == 0
+
+    def test_exits_when_no_providers_configured(self):
+        with pytest.raises(SystemExit) as exc:
+            select_provider_and_model({"providers": {}})
+        assert exc.value.code == 1
+
+    def test_ignores_unknown_last_provider(self):
+        with patch("questionary.select") as mock_select:
+            mock_select.return_value.ask.side_effect = [
+                "openrouter",
+                "anthropic/claude-sonnet-4-6",
+            ]
+            select_provider_and_model(
+                SAMPLE_CONFIG, last_provider="nonexistent", last_model=None
+            )
+            provider_call_kwargs = mock_select.call_args_list[0][1]
+        assert provider_call_kwargs["default"] is None
