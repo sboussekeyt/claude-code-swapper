@@ -98,4 +98,8 @@ def launch_claude(provider_config: dict, model: str) -> None:
 
 
 def main() -> None:
-    pass
+    config = load_config(CONFIG_PATH)
+    last_provider, last_model = load_last(LAST_PATH)
+    provider, model = select_provider_and_model(config, last_provider, last_model)
+    save_last(provider, model, LAST_PATH)
+    launch_claude(config["providers"][provider], model)

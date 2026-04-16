@@ -4,7 +4,7 @@ import yaml
 from pathlib import Path
 from unittest.mock import patch
 
-from claude_code_swapper.main import load_config, load_last, save_last, select_provider_and_model
+from claude_code_swapper.main import load_config, load_last, save_last, select_provider_and_model, main
 
 SAMPLE_CONFIG = {
     "providers": {
@@ -232,3 +232,42 @@ class TestLaunchClaude:
             launch_claude({"api_key": "k", "base_url": "u"}, "model")
         assert exc.value.code == 1
         assert "claude" in capsys.readouterr().out.lower()
+
+
+class TestMain:
+    def test_full_flow(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        last_file = tmp_path / "last.yaml"
+        config_file.write_text(yaml.dump(SAMPLE_CONFIG))
+
+        with patch("claude_code_swapper.main.CONFIG_PATH", config_file), \
+             patch("claude_code_swapper.main.LAST_PATH", last_file), \
+             patch("questionary.select") as mock_select, \
+             patch("shutil.which", return_value="/usr/bin/claude"), \
+             patch("os.execvpe") as mock_exec:
+            mock_select.return_value.ask.side_effect = [
+                "openrouter",
+                "anthropic/claude-sonnet-4-6",
+            ]
+            main()
+
+        env = mock_exec.call_args[0][2]
+        assert env["ANTHROPIC_API_KEY"] == "sk-or-test"
+        assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api/v1"
+        assert mock_exec.call_args[0][1] == ["claude", "--model", "anthropic/claude-sonnet-4-6"]
+
+    def test_saves_last_selection(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        last_file = tmp_path / "last.yaml"
+        config_file.write_text(yaml.dump(SAMPLE_CONFIG))
+
+        with patch("claude_code_swapper.main.CONFIG_PATH", config_file), \
+             patch("claude_code_swapper.main.LAST_PATH", last_file), \
+             patch("questionary.select") as mock_select, \
+             patch("shutil.which", return_value="/usr/bin/claude"), \
+             patch("os.execvpe"):
+            mock_select.return_value.ask.side_effect = ["anthropic", "claude-opus-4-6"]
+            main()
+
+        data = yaml.safe_load(last_file.read_text())
+        assert data == {"provider": "anthropic", "model": "claude-opus-4-6"}
