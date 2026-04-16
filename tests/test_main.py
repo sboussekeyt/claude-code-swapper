@@ -4,7 +4,7 @@ import yaml
 from pathlib import Path
 from unittest.mock import patch
 
-from claude_code_swapper.main import load_config, load_last, save_last, select_provider_and_model, main
+from claude_code_swapper.main import load_config, load_last, save_last, select_provider_and_model, launch_claude, main
 
 SAMPLE_CONFIG = {
     "providers": {
@@ -170,9 +170,6 @@ class TestSelectProviderAndModel:
             )
             provider_call_kwargs = mock_select.call_args_list[0][1]
         assert provider_call_kwargs["default"] is None
-
-
-from claude_code_swapper.main import launch_claude
 
 
 class TestLaunchClaude:
