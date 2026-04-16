@@ -4,7 +4,7 @@ import yaml
 from pathlib import Path
 from unittest.mock import patch
 
-from claude_code_swapper.main import load_config
+from claude_code_swapper.main import load_config, load_last, save_last
 
 SAMPLE_CONFIG = {
     "providers": {
@@ -65,3 +65,32 @@ class TestLoadConfig:
             load_config(config_path=config_file)
         assert exc.value.code == 1
         assert "Invalid YAML" in capsys.readouterr().out
+
+
+class TestLoadLast:
+    def test_returns_none_when_file_missing(self, tmp_path):
+        result = load_last(last_path=tmp_path / "last.yaml")
+        assert result == (None, None)
+
+    def test_returns_saved_values(self, tmp_path):
+        last_file = tmp_path / "last.yaml"
+        last_file.write_text(yaml.dump({"provider": "openrouter", "model": "claude-3"}))
+        assert load_last(last_path=last_file) == ("openrouter", "claude-3")
+
+    def test_returns_none_on_corrupt_yaml(self, tmp_path):
+        last_file = tmp_path / "last.yaml"
+        last_file.write_text(": invalid :")
+        assert load_last(last_path=last_file) == (None, None)
+
+
+class TestSaveLast:
+    def test_writes_provider_and_model(self, tmp_path):
+        last_file = tmp_path / "last.yaml"
+        save_last("openrouter", "claude-3", last_path=last_file)
+        data = yaml.safe_load(last_file.read_text())
+        assert data == {"model": "claude-3", "provider": "openrouter"}
+
+    def test_creates_parent_directories(self, tmp_path):
+        last_file = tmp_path / "nested" / "dir" / "last.yaml"
+        save_last("openrouter", "model", last_path=last_file)
+        assert last_file.exists()

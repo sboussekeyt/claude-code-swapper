@@ -28,5 +28,22 @@ def load_config(config_path: Path = CONFIG_PATH) -> dict:
         sys.exit(1)
 
 
+def load_last(last_path: Path = LAST_PATH) -> tuple[str | None, str | None]:
+    if not last_path.exists():
+        return None, None
+    try:
+        with open(last_path) as f:
+            data = yaml.safe_load(f) or {}
+        return data.get("provider"), data.get("model")
+    except yaml.YAMLError:
+        return None, None
+
+
+def save_last(provider: str, model: str, last_path: Path = LAST_PATH) -> None:
+    last_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(last_path, "w") as f:
+        yaml.dump({"provider": provider, "model": model}, f)
+
+
 def main() -> None:
     pass
