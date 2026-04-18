@@ -1,8 +1,8 @@
 import os
-import sys
 import shutil
-from pathlib import Path
+import sys
 from importlib.resources import files
+from pathlib import Path
 
 import questionary
 import yaml
@@ -15,7 +15,9 @@ LAST_PATH = CONFIG_DIR / "last.yaml"
 def load_config(config_path: Path = CONFIG_PATH) -> dict:
     if not config_path.exists():
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        example = files("claude_code_swapper").joinpath("config.example.yaml").read_text()
+        example = (
+            files("claude_code_swapper").joinpath("config.example.yaml").read_text()
+        )
         config_path.write_text(example)
         print(f"Config created at {config_path}")
         print("Edit it to add your API keys, then run claude-code-swapper again.")
@@ -50,11 +52,7 @@ def select_provider_and_model(
     last_provider: str | None = None,
     last_model: str | None = None,
 ) -> tuple[str, str]:
-    providers = [
-        p
-        for p, v in config.get("providers", {}).items()
-        if v.get("models")
-    ]
+    providers = [p for p, v in config.get("providers", {}).items() if v.get("models")]
     if not providers:
         print("No providers with models configured.")
         print("Edit ~/.config/claude-code-swapper/config.yaml to add providers.")
@@ -103,3 +101,7 @@ def main() -> None:
     provider, model = select_provider_and_model(config, last_provider, last_model)
     save_last(provider, model, LAST_PATH)
     launch_claude(config["providers"][provider], model)
+
+
+if __name__ == "__main__":
+    main()
