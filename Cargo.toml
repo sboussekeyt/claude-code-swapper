@@ -3,10 +3,6 @@ name = "claude-code-swapper"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-name = "claude_code_swapper"
-path = "src/lib.rs"
-
 [[bin]]
 name = "claude-code-swapper"
 path = "src/main.rs"
