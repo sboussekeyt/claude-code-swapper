@@ -119,6 +119,102 @@ impl AppState {
     pub fn can_launch(&self) -> bool {
         self.current_provider.is_some() && self.current_model.is_some()
     }
+
+    pub fn add_model(&mut self, provider: &str, model_name: &str) -> bool {
+        let Some(p) = self.config.providers.get_mut(provider) else {
+            return false;
+        };
+        if p.models.iter().any(|m| m == model_name) {
+            self.status_message = Some(format!("Model '{model_name}' already exists in {provider}."));
+            return false;
+        }
+        p.models.push(model_name.to_string());
+        self.refresh_focused_provider_models();
+        true
+    }
+
+    pub fn remove_model(&mut self, provider: &str, model_name: &str) {
+        if let Some(p) = self.config.providers.get_mut(provider) {
+            p.models.retain(|m| m != model_name);
+        }
+        self.refresh_focused_provider_models();
+    }
+
+    pub fn remove_focused_model(&mut self) {
+        let Some(provider) = self.focused_provider().map(|s| s.to_string()) else {
+            return;
+        };
+        let Some(model) = self.models_for_focused_provider.get(self.model_cursor).cloned() else {
+            return;
+        };
+        self.remove_model(&provider, &model);
+    }
+
+    pub fn set_api_key(&mut self, provider: &str, key: &str) -> bool {
+        let Some(p) = self.config.providers.get_mut(provider) else {
+            return false;
+        };
+        p.api_key = key.to_string();
+        true
+    }
+
+    pub fn toggle_rtk(&mut self) {
+        self.rtk_enabled = !self.rtk_enabled;
+    }
+
+    pub fn toggle_auto_accept(&mut self) {
+        self.auto_accept = !self.auto_accept;
+    }
+
+    pub fn open_add_model_modal(&mut self) {
+        if let Some(provider) = self.focused_provider() {
+            self.modal = Some(Modal::AddModel {
+                provider: provider.to_string(),
+                input: String::new(),
+            });
+        }
+    }
+
+    pub fn open_set_api_key_modal(&mut self) {
+        if let Some(provider) = self.focused_provider() {
+            self.modal = Some(Modal::SetApiKey {
+                provider: provider.to_string(),
+                input: String::new(),
+            });
+        }
+    }
+
+    pub fn modal_input_char(&mut self, c: char) {
+        match &mut self.modal {
+            Some(Modal::AddModel { input, .. }) | Some(Modal::SetApiKey { input, .. }) => input.push(c),
+            None => {}
+        }
+    }
+
+    pub fn modal_backspace(&mut self) {
+        match &mut self.modal {
+            Some(Modal::AddModel { input, .. }) | Some(Modal::SetApiKey { input, .. }) => {
+                input.pop();
+            }
+            None => {}
+        }
+    }
+
+    pub fn close_modal(&mut self) {
+        self.modal = None;
+    }
+
+    pub fn confirm_modal(&mut self) {
+        match self.modal.take() {
+            Some(Modal::AddModel { provider, input }) if !input.trim().is_empty() => {
+                self.add_model(&provider, input.trim());
+            }
+            Some(Modal::SetApiKey { provider, input }) if !input.is_empty() => {
+                self.set_api_key(&provider, &input);
+            }
+            _ => {}
+        }
+    }
 }
 
 fn clamp_cursor(cursor: usize, delta: i32, len: usize) -> usize {
@@ -246,5 +342,102 @@ mod tests {
         assert!(!state.can_launch());
         state.apply_selection();
         assert!(state.can_launch());
+    }
+
+    #[test]
+    fn add_model_appends_and_refreshes_models_list() {
+        let config = config_with(&[("a", &["m1"])]);
+        let mut state = AppState::new(config, &Last::default());
+        assert!(state.add_model("a", "m2"));
+        assert_eq!(state.config.providers["a"].models, vec!["m1", "m2"]);
+        assert_eq!(state.models_for_focused_provider, vec!["m1", "m2"]);
+    }
+
+    #[test]
+    fn add_model_rejects_duplicate() {
+        let config = config_with(&[("a", &["m1"])]);
+        let mut state = AppState::new(config, &Last::default());
+        assert!(!state.add_model("a", "m1"));
+        assert_eq!(state.config.providers["a"].models, vec!["m1"]);
+        assert!(state.status_message.is_some());
+    }
+
+    #[test]
+    fn remove_focused_model_removes_highlighted_model() {
+        let config = config_with(&[("a", &["m1", "m2"])]);
+        let mut state = AppState::new(config, &Last::default());
+        state.switch_focus();
+        state.move_cursor(1); // highlight m2
+        state.remove_focused_model();
+        assert_eq!(state.config.providers["a"].models, vec!["m1"]);
+        assert_eq!(state.models_for_focused_provider, vec!["m1"]);
+    }
+
+    #[test]
+    fn set_api_key_updates_provider_key() {
+        let config = config_with(&[("a", &["m1"])]);
+        let mut state = AppState::new(config, &Last::default());
+        assert!(state.set_api_key("a", "new-key"));
+        assert_eq!(state.config.providers["a"].api_key, "new-key");
+    }
+
+    #[test]
+    fn toggle_rtk_and_auto_accept_flip_booleans() {
+        let config = config_with(&[("a", &["m1"])]);
+        let mut state = AppState::new(config, &Last::default());
+        assert!(!state.rtk_enabled);
+        state.toggle_rtk();
+        assert!(state.rtk_enabled);
+        assert!(!state.auto_accept);
+        state.toggle_auto_accept();
+        assert!(state.auto_accept);
+    }
+
+    #[test]
+    fn add_model_modal_flow_types_and_confirms() {
+        let config = config_with(&[("a", &["m1"])]);
+        let mut state = AppState::new(config, &Last::default());
+        state.open_add_model_modal();
+        assert_eq!(
+            state.modal,
+            Some(Modal::AddModel { provider: "a".to_string(), input: String::new() })
+        );
+        state.modal_input_char('m');
+        state.modal_input_char('2');
+        state.modal_backspace();
+        state.modal_input_char('2');
+        state.confirm_modal();
+        assert_eq!(state.modal, None);
+        assert_eq!(state.config.providers["a"].models, vec!["m1", "m2"]);
+    }
+
+    #[test]
+    fn close_modal_discards_without_applying() {
+        let config = config_with(&[("a", &["m1"])]);
+        let mut state = AppState::new(config, &Last::default());
+        state.open_add_model_modal();
+        state.modal_input_char('x');
+        state.close_modal();
+        assert_eq!(state.modal, None);
+        assert_eq!(state.config.providers["a"].models, vec!["m1"]);
+    }
+
+    #[test]
+    fn set_api_key_modal_flow_confirms() {
+        let config = config_with(&[("a", &["m1"])]);
+        let mut state = AppState::new(config, &Last::default());
+        state.open_set_api_key_modal();
+        state.modal_input_char('k');
+        state.confirm_modal();
+        assert_eq!(state.config.providers["a"].api_key, "k");
+    }
+
+    #[test]
+    fn confirm_modal_ignores_empty_add_model_input() {
+        let config = config_with(&[("a", &["m1"])]);
+        let mut state = AppState::new(config, &Last::default());
+        state.open_add_model_modal();
+        state.confirm_modal();
+        assert_eq!(state.config.providers["a"].models, vec!["m1"]);
     }
 }
