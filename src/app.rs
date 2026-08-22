@@ -209,7 +209,7 @@ impl AppState {
             Some(Modal::AddModel { provider, input }) if !input.trim().is_empty() => {
                 self.add_model(&provider, input.trim());
             }
-            Some(Modal::SetApiKey { provider, input }) if !input.is_empty() => {
+            Some(Modal::SetApiKey { provider, input }) if !input.trim().is_empty() => {
                 self.set_api_key(&provider, &input);
             }
             _ => {}
@@ -439,5 +439,17 @@ mod tests {
         state.open_add_model_modal();
         state.confirm_modal();
         assert_eq!(state.config.providers["a"].models, vec!["m1"]);
+    }
+
+    #[test]
+    fn confirm_modal_ignores_whitespace_only_api_key_input() {
+        let config = config_with(&[("a", &["m1"])]);
+        let mut state = AppState::new(config, &Last::default());
+        let original_key = state.config.providers["a"].api_key.clone();
+        state.open_set_api_key_modal();
+        state.modal_input_char(' ');
+        state.confirm_modal();
+        assert_eq!(state.modal, None);
+        assert_eq!(state.config.providers["a"].api_key, original_key);
     }
 }
