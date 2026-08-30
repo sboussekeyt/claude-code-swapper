@@ -2,7 +2,7 @@ use crate::app::AppState;
 use crate::config;
 use crate::config::Last;
 use crate::discovery;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use std::path::Path;
 use std::time::Duration;
 
@@ -11,6 +11,14 @@ pub enum Action {
     Launch,
     LaunchNative,
     Quit,
+}
+
+pub fn crossterm_read() -> Event {
+    loop {
+        if let Ok(ev) = event::read() {
+            return ev;
+        }
+    }
 }
 
 pub fn refresh_discovery(state: &mut AppState) {
