@@ -85,11 +85,16 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
         })
         .collect();
     let models_border = panel_border_style(models_focused);
+    let models_title = if state.search_active {
+        format!("Models — search: {}_", state.search_query)
+    } else {
+        "Models".to_string()
+    };
     let mut model_state = ListState::default().with_selected(Some(state.model_cursor));
     frame.render_stateful_widget(
         List::new(model_items).block(
             Block::default()
-                .title("Models")
+                .title(models_title)
                 .borders(Borders::ALL)
                 .border_style(models_border),
         ),
@@ -118,10 +123,14 @@ fn cursor_style(panel_focused: bool) -> Style {
 }
 
 fn render_footer(frame: &mut Frame, state: &AppState, area: Rect) {
-    let keys = "[Tab] switch  [↑/↓] move  [Enter] select  [l] launch  [n] native  [a] add  [x] remove  [s] api key  [r] rtk  [p] auto-accept  [q] quit";
-    let text = match &state.status_message {
-        Some(msg) => format!("{keys}\n[{msg}]"),
-        None => keys.to_string(),
+    let text = if state.search_active {
+        "[type] filter  [↑/↓] move  [Enter] select  [Esc] cancel search".to_string()
+    } else {
+        let keys = "[Tab] switch  [↑/↓] move  [Enter] select  [/] search  [l] launch  [n] native  [a] add  [x] remove  [s] api key  [r] rtk  [p] auto-accept  [q] quit";
+        match &state.status_message {
+            Some(msg) => format!("{keys}\n[{msg}]"),
+            None => keys.to_string(),
+        }
     };
     frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), area);
 }

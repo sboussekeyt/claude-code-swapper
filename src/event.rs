@@ -43,6 +43,26 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent, config_path: &Path, last_
         return Action::Quit;
     }
 
+    if state.search_active {
+        match key.code {
+            KeyCode::Char(c) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+                state.search_input_char(c)
+            }
+            KeyCode::Backspace => state.search_backspace(),
+            KeyCode::Esc => state.close_search(),
+            KeyCode::Up => state.move_cursor(-1),
+            KeyCode::Down => state.move_cursor(1),
+            KeyCode::Enter => {
+                if state.apply_selection() {
+                    save_current_last(state, last_path);
+                }
+                state.close_search();
+            }
+            _ => {}
+        }
+        return Action::Continue;
+    }
+
     if state.modal.is_some() {
         match key.code {
             KeyCode::Char(c) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
@@ -79,6 +99,7 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent, config_path: &Path, last_
             config::save_config(&state.config, config_path);
         }
         (KeyCode::Char('s'), KeyModifiers::NONE) => state.open_set_api_key_modal(),
+        (KeyCode::Char('/'), KeyModifiers::NONE) => state.start_search(),
         (KeyCode::Char('r'), KeyModifiers::NONE) => {
             state.toggle_rtk();
             save_current_last(state, last_path);
@@ -345,5 +366,62 @@ mod tests {
         state.models_for_focused_provider = vec![];
         refresh_discovery(&mut state);
         assert_eq!(state.models_for_focused_provider, vec!["m1", "m2"]);
+    }
+
+    #[test]
+    fn slash_opens_search_and_filters_by_typed_characters() {
+        let mut state = state_with(&[("openrouter", &["anthropic/claude", "meta/llama", "mistralai/mistral"])]);
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("c.yaml");
+        let last_path = dir.path().join("l.yaml");
+
+        handle_key(&mut state, key(KeyCode::Tab), &config_path, &last_path); // focus Models
+        handle_key(&mut state, key(KeyCode::Char('/')), &config_path, &last_path);
+        assert!(state.search_active);
+
+        for c in "llama".chars() {
+            handle_key(&mut state, key(KeyCode::Char(c)), &config_path, &last_path);
+        }
+
+        assert_eq!(state.models_for_focused_provider, vec!["meta/llama"]);
+    }
+
+    #[test]
+    fn esc_cancels_search_instead_of_quitting() {
+        let mut state = state_with(&[("a", &["gpt", "claude"])]);
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("c.yaml");
+        let last_path = dir.path().join("l.yaml");
+
+        handle_key(&mut state, key(KeyCode::Tab), &config_path, &last_path);
+        handle_key(&mut state, key(KeyCode::Char('/')), &config_path, &last_path);
+        handle_key(&mut state, key(KeyCode::Char('x')), &config_path, &last_path); // types 'x', doesn't remove a model
+
+        let action = handle_key(&mut state, key(KeyCode::Esc), &config_path, &last_path);
+
+        assert!(matches!(action, Action::Continue));
+        assert!(!state.search_active);
+        assert_eq!(state.config.providers["a"].models, vec!["gpt", "claude"]);
+    }
+
+    #[test]
+    fn enter_during_search_selects_the_highlighted_model_and_closes_search() {
+        let mut state = state_with(&[("a", &["gpt", "claude"])]);
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("c.yaml");
+        let last_path = dir.path().join("l.yaml");
+
+        handle_key(&mut state, key(KeyCode::Tab), &config_path, &last_path);
+        handle_key(&mut state, key(KeyCode::Char('/')), &config_path, &last_path);
+        for c in "claude".chars() {
+            handle_key(&mut state, key(KeyCode::Char(c)), &config_path, &last_path);
+        }
+
+        handle_key(&mut state, key(KeyCode::Enter), &config_path, &last_path);
+
+        assert!(!state.search_active);
+        assert_eq!(state.current_model.as_deref(), Some("claude"));
+        let saved = config::load_last(&last_path);
+        assert_eq!(saved.model.as_deref(), Some("claude"));
     }
 }

@@ -22,10 +22,12 @@ claude-code-swapper
 - `a` — add a model to the focused provider
 - `x` — remove the highlighted model
 - `s` — set the API key for the focused provider
+- `/` — search/filter the Models panel (useful for providers with a large catalog, like OpenRouter)
 - `r` — toggle RTK mode
 - `p` — toggle auto-accept mode (`--dangerously-skip-permissions`)
 - `q` / `Esc` / `Ctrl+C` — quit
 - Inside a modal (add model / set API key): `Enter` confirm, `Esc` cancel, `Backspace` delete last character
+- While searching: type to filter (case-insensitive substring match), `↑`/`↓` to move within the filtered list, `Enter` to select the highlighted model and close the search, `Esc` to cancel the search and restore the full list
 
 ## Config
 

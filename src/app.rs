@@ -17,8 +17,15 @@ pub struct AppState {
     pub focused_panel: Panel,
     pub provider_cursor: usize,
     pub model_cursor: usize,
+    /// The currently *displayed* model list — either `all_models_for_focused_provider`
+    /// verbatim, or a substring-filtered view of it while a search is active.
     pub models_for_focused_provider: Vec<String>,
+    /// The full, unfiltered model list for the focused provider (discovered or static).
+    /// Search filters from this; it's untouched by typing a query.
+    pub all_models_for_focused_provider: Vec<String>,
     pub models_are_discovered: bool,
+    pub search_active: bool,
+    pub search_query: String,
     pub current_provider: Option<String>,
     pub current_model: Option<String>,
     pub rtk_enabled: bool,
@@ -49,7 +56,10 @@ impl AppState {
             provider_cursor,
             model_cursor: 0,
             models_for_focused_provider: Vec::new(),
+            all_models_for_focused_provider: Vec::new(),
             models_are_discovered: false,
+            search_active: false,
+            search_query: String::new(),
             current_provider,
             current_model,
             rtk_enabled: last.rtk_enabled,
@@ -71,6 +81,9 @@ impl AppState {
             Panel::Providers => Panel::Models,
             Panel::Models => Panel::Providers,
         };
+        if self.search_active {
+            self.close_search();
+        }
     }
 
     pub fn move_cursor(&mut self, delta: i32) {
@@ -104,6 +117,8 @@ impl AppState {
     }
 
     fn replace_focused_provider_models(&mut self, models: Vec<String>, discovered: bool) {
+        self.search_active = false;
+        self.search_query.clear();
         self.model_cursor = 0;
         if let Some(current) = &self.current_model {
             if self.focused_provider() == self.current_provider.as_deref() {
@@ -112,8 +127,57 @@ impl AppState {
                 }
             }
         }
+        self.all_models_for_focused_provider = models.clone();
         self.models_for_focused_provider = models;
         self.models_are_discovered = discovered;
+    }
+
+    /// Enter search mode for the Models panel. No-op outside it — search only
+    /// makes sense against whatever model list is currently on screen.
+    pub fn start_search(&mut self) {
+        if self.focused_panel != Panel::Models {
+            return;
+        }
+        self.search_active = true;
+        self.search_query.clear();
+        self.apply_search_filter();
+    }
+
+    pub fn search_input_char(&mut self, c: char) {
+        if !self.search_active {
+            return;
+        }
+        self.search_query.push(c);
+        self.apply_search_filter();
+    }
+
+    pub fn search_backspace(&mut self) {
+        if !self.search_active {
+            return;
+        }
+        self.search_query.pop();
+        self.apply_search_filter();
+    }
+
+    pub fn close_search(&mut self) {
+        self.search_active = false;
+        self.search_query.clear();
+        self.models_for_focused_provider = self.all_models_for_focused_provider.clone();
+        self.model_cursor = 0;
+    }
+
+    fn apply_search_filter(&mut self) {
+        self.models_for_focused_provider = if self.search_query.is_empty() {
+            self.all_models_for_focused_provider.clone()
+        } else {
+            let query = self.search_query.to_lowercase();
+            self.all_models_for_focused_provider
+                .iter()
+                .filter(|m| m.to_lowercase().contains(&query))
+                .cloned()
+                .collect()
+        };
+        self.model_cursor = 0;
     }
 
     pub fn apply_selection(&mut self) -> bool {
@@ -546,5 +610,75 @@ mod tests {
         state.confirm_modal();
         assert_eq!(state.modal, None);
         assert_eq!(state.config.providers["a"].api_key, original_key);
+    }
+
+    #[test]
+    fn start_search_is_a_no_op_outside_the_models_panel() {
+        let config = config_with(&[("a", &["gpt", "claude"])]);
+        let mut state = AppState::new(config, &Last::default());
+        assert_eq!(state.focused_panel, Panel::Providers);
+
+        state.start_search();
+
+        assert!(!state.search_active);
+    }
+
+    #[test]
+    fn search_filters_models_case_insensitively_and_resets_on_clear() {
+        let config = config_with(&[("openrouter", &["anthropic/claude-sonnet-4-6", "meta-llama/llama-3.1-8b-instruct", "mistralai/mistral-7b-instruct"])]);
+        let mut state = AppState::new(config, &Last::default());
+        state.switch_focus();
+        assert_eq!(state.focused_panel, Panel::Models);
+
+        state.start_search();
+        assert!(state.search_active);
+        for c in "LLAMA".chars() {
+            state.search_input_char(c);
+        }
+
+        assert_eq!(state.models_for_focused_provider, vec!["meta-llama/llama-3.1-8b-instruct"]);
+        assert_eq!(state.model_cursor, 0);
+        // The master list is untouched by the filter.
+        assert_eq!(state.all_models_for_focused_provider.len(), 3);
+
+        state.search_backspace();
+        state.search_backspace();
+        state.search_backspace();
+        state.search_backspace();
+        state.search_backspace(); // "LL" -> "L" -> "" ... backspacing past empty is a no-op
+        assert_eq!(state.models_for_focused_provider.len(), 3);
+    }
+
+    #[test]
+    fn closing_search_restores_the_full_model_list() {
+        let config = config_with(&[("a", &["gpt", "claude", "llama"])]);
+        let mut state = AppState::new(config, &Last::default());
+        state.switch_focus();
+        state.start_search();
+        for c in "zzz-no-match".chars() {
+            state.search_input_char(c);
+        }
+        assert!(state.models_for_focused_provider.is_empty());
+
+        state.close_search();
+
+        assert!(!state.search_active);
+        assert!(state.search_query.is_empty());
+        assert_eq!(state.models_for_focused_provider, vec!["gpt", "claude", "llama"]);
+    }
+
+    #[test]
+    fn switching_focus_away_from_models_closes_an_active_search() {
+        let config = config_with(&[("a", &["gpt", "claude"])]);
+        let mut state = AppState::new(config, &Last::default());
+        state.switch_focus();
+        state.start_search();
+        state.search_input_char('g');
+        assert!(state.search_active);
+
+        state.switch_focus(); // back to Providers
+
+        assert!(!state.search_active);
+        assert_eq!(state.models_for_focused_provider, vec!["gpt", "claude"]);
     }
 }

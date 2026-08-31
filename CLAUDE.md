@@ -3,8 +3,7 @@
 Full-screen `ratatui` TUI, single self-contained Rust binary, for launching Claude Code
 against different LLM providers (OpenRouter, Groq, LM Studio, Ollama, etc.) via
 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`. This is the Rust rewrite of the original
-Python `claude_code_swapper` package — the Python code has been (or will be) removed once
-this reaches parity.
+Python `claude_code_swapper` package; the Python implementation has been removed.
 
 ## Commands
 
@@ -56,6 +55,7 @@ Python original's `Path.home() / ".config" / ...`).
 | `a` | Add a model to the focused provider (opens modal) |
 | `x` | Remove the focused model |
 | `s` | Set API key for the focused provider (opens masked modal) |
+| `/` | Search/filter the Models panel (case-insensitive substring match) |
 | `r` | Toggle RTK mode |
 | `p` | Toggle auto-accept mode (`--dangerously-skip-permissions`) |
 | `q` / `Esc` / `Ctrl+C` | Quit |
@@ -64,6 +64,15 @@ Python original's `Path.home() / ".config" / ...`).
 Ctrl-modified letter keys (`Ctrl+X`, `Ctrl+A`, `Ctrl+L`, etc.) are intentionally inert —
 only the plain, unmodified key fires the action, so accidental chords can't trigger
 destructive operations (e.g. `Ctrl+X` does not delete a model).
+
+While search is active (`AppState::search_active`), all keys are intercepted before the
+normal shortcut match: typed characters filter, `↑`/`↓` still move within the filtered
+list, `Enter` selects and closes the search, `Esc` cancels it (instead of quitting).
+`AppState::all_models_for_focused_provider` is the unfiltered source of truth;
+`models_for_focused_provider` is what's on screen (filtered or not) — every place that
+mutates the model list (`refresh_focused_provider_models`, `set_focused_provider_models`
+via discovery) resets and closes any active search, and switching panel focus away from
+Models does too, so search state can never point at a stale list.
 
 ## Gotchas
 
@@ -80,9 +89,3 @@ destructive operations (e.g. `Ctrl+X` does not delete a model).
   the whole program.
 - Key events are filtered to `KeyEventKind::Press` — some terminals/platforms also emit
   `Release`/`Repeat` events, which must not double-fire actions.
-
-## Merge note
-
-This file does not exist on `main` yet — `main`'s `CLAUDE.md` documents the now-superseded
-Python implementation. Expect a real conflict when this branch merges; reconcile by keeping
-this Rust-focused version (the Python package is being removed as part of the rewrite).
