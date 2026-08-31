@@ -208,3 +208,8 @@ __marimo__/
 
 # Local git worktrees (superpowers:using-git-worktrees)
 .worktrees/
+
+
+# Added by cargo
+
+/target

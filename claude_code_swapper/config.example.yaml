@@ -1,32 +1,12 @@
 providers:
   openrouter:
-    base_url: https://openrouter.ai/api/v1
+    base_url: https://openrouter.ai/api
     api_key: sk-or-REPLACE_ME
     models:
       - anthropic/claude-sonnet-4-6
+      - deepseek/deepseek-chat-v3-0324
       - meta-llama/llama-3.1-8b-instruct
       - mistralai/mistral-7b-instruct
-
-  anthropic:
-    base_url: https://api.anthropic.com
-    api_key: sk-ant-REPLACE_ME
-    models:
-      - claude-opus-4-6
-      - claude-sonnet-4-6
-      - claude-haiku-4-5
-
-  minimax:
-    base_url: https://api.minimax.chat/v1
-    api_key: REPLACE_ME
-    models:
-      - abab6.5s-chat
-
-  glm:
-    base_url: https://open.bigmodel.cn/api/paas/v4
-    api_key: REPLACE_ME
-    models:
-      - glm-4
-      - glm-4-flash
 
   groq:
     base_url: https://api.groq.com/openai/v1
@@ -34,3 +14,9 @@ providers:
     models:
       - llama-3.1-8b-instant
       - mixtral-8x7b-32768
+
+  lmstudio:
+    base_url: http://localhost:1234 # no trailing /v1 — claude appends /v1/messages itself
+    api_key: lm-studio
+    models:
+      - local-model # replace with the model identifier loaded in LM Studio
