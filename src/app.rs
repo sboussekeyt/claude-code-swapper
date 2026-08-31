@@ -34,6 +34,12 @@ pub struct AppState {
     pub discovered_context_windows: IndexMap<String, u64>,
     pub search_active: bool,
     pub search_query: String,
+    /// Up to 10 most-recently-selected model names per provider, newest
+    /// first (mirrors `config::Last.recent_models`, loaded from it at
+    /// startup). Models in this list are shown first in the Models panel
+    /// for their provider. Usage history only — never mutates
+    /// `config::Provider.models`.
+    pub recent_models: IndexMap<String, Vec<String>>,
     pub current_provider: Option<String>,
     pub current_model: Option<String>,
     pub rtk_enabled: bool,
@@ -69,6 +75,7 @@ impl AppState {
             discovered_context_windows: IndexMap::new(),
             search_active: false,
             search_query: String::new(),
+            recent_models: last.recent_models.clone(),
             current_provider,
             current_model,
             rtk_enabled: last.rtk_enabled,
@@ -141,6 +148,7 @@ impl AppState {
     fn replace_focused_provider_models(&mut self, models: Vec<String>, discovered: bool) {
         self.search_active = false;
         self.search_query.clear();
+        let models = self.reorder_by_recents(models);
         self.model_cursor = 0;
         if let Some(current) = &self.current_model {
             if self.focused_provider() == self.current_provider.as_deref() {
@@ -153,6 +161,70 @@ impl AppState {
         self.models_for_focused_provider = models;
         self.models_are_discovered = discovered;
         self.discovered_context_windows = IndexMap::new();
+    }
+
+    /// Moves models present in the focused provider's recents to the front,
+    /// in recency order, followed by the rest in their original order.
+    /// Models no longer present (removed from config, or a discovered list
+    /// that changed) are silently dropped rather than invented.
+    fn reorder_by_recents(&self, models: Vec<String>) -> Vec<String> {
+        let Some(recents) = self.focused_provider().and_then(|p| self.recent_models.get(p)) else {
+            return models;
+        };
+        if recents.is_empty() {
+            return models;
+        }
+        let mut ordered = Vec::with_capacity(models.len());
+        for r in recents {
+            if models.contains(r) {
+                ordered.push(r.clone());
+            }
+        }
+        for m in models {
+            if !ordered.contains(&m) {
+                ordered.push(m);
+            }
+        }
+        ordered
+    }
+
+    /// Records `model` as the most-recently-selected model for `provider`,
+    /// capped at the 10 newest. Pure usage history — does not touch
+    /// `config::Provider.models` or persist by itself (the caller saves
+    /// `last.yaml`, mirroring how selection already persists it there).
+    fn record_recent_model(&mut self, provider: &str, model: &str) {
+        let list = self.recent_models.entry(provider.to_string()).or_default();
+        list.retain(|m| m != model);
+        list.insert(0, model.to_string());
+        list.truncate(10);
+    }
+
+    /// Removes the highlighted model from the focused provider's recents
+    /// list (not from config) and re-sorts the panel accordingly. No-op if
+    /// the highlighted model isn't currently a recent.
+    pub fn remove_focused_model_from_recents(&mut self) {
+        let Some(provider) = self.focused_provider().map(|s| s.to_string()) else {
+            return;
+        };
+        let Some(model) = self.models_for_focused_provider.get(self.model_cursor).cloned() else {
+            return;
+        };
+        let removed = self
+            .recent_models
+            .get_mut(&provider)
+            .map(|list| {
+                let before = list.len();
+                list.retain(|m| m != &model);
+                list.len() != before
+            })
+            .unwrap_or(false);
+        if !removed {
+            self.status_message = Some(format!("'{model}' isn't in your recents."));
+            return;
+        }
+        self.resort_models_panel_by_recents();
+        self.model_cursor = 0;
+        self.status_message = Some(format!("Removed '{model}' from recents."));
     }
 
     /// Enter search mode for the Models panel. No-op outside it — search only
@@ -212,9 +284,27 @@ impl AppState {
             self.status_message = Some("No models available for this provider.".to_string());
             return false;
         };
+        self.record_recent_model(&provider, &model);
+        // Re-sort immediately so the just-picked model visibly jumps to the
+        // top with its ★ marker, rather than only on the next
+        // provider-switch/re-discovery refresh.
+        self.resort_models_panel_by_recents();
+        self.model_cursor = 0;
         self.current_provider = Some(provider);
         self.current_model = Some(model);
         true
+    }
+
+    /// Re-derives `all_models_for_focused_provider`/`models_for_focused_provider`
+    /// from the current `recent_models`, without touching config or re-running
+    /// discovery. Shared by anything that mutates `recent_models` mid-session.
+    fn resort_models_panel_by_recents(&mut self) {
+        self.all_models_for_focused_provider = self.reorder_by_recents(self.all_models_for_focused_provider.clone());
+        if self.search_active {
+            self.apply_search_filter();
+        } else {
+            self.models_for_focused_provider = self.all_models_for_focused_provider.clone();
+        }
     }
 
     pub fn can_launch(&self) -> bool {
@@ -477,6 +567,84 @@ mod tests {
         assert!(state.apply_selection());
         assert_eq!(state.current_provider.as_deref(), Some("a"));
         assert_eq!(state.current_model.as_deref(), Some("m2"));
+    }
+
+    #[test]
+    fn apply_selection_records_and_reorders_into_recents() {
+        let config = config_with(&[("a", &["m1", "m2", "m3"])]);
+        let mut state = AppState::new(config, &Last::default());
+        state.switch_focus();
+        state.move_cursor(2); // highlight m3
+        assert!(state.apply_selection());
+
+        assert_eq!(state.recent_models.get("a"), Some(&vec!["m3".to_string()]));
+        // The panel must reorder immediately, in the same call — not only
+        // on the next provider-switch/re-discovery refresh.
+        assert_eq!(state.models_for_focused_provider, vec!["m3", "m1", "m2"]);
+        assert_eq!(state.model_cursor, 0, "cursor should follow the selection to its new top position");
+    }
+
+    #[test]
+    fn recent_models_are_capped_at_ten_newest_first() {
+        let names: Vec<&str> = vec!["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9", "m10"];
+        let config = config_with(&[("a", &names)]);
+        let mut state = AppState::new(config, &Last::default());
+        state.switch_focus();
+        // Select each model in turn (m0 first, m10 last).
+        for name in &names {
+            state.model_cursor = state.models_for_focused_provider.iter().position(|m| m == name).unwrap();
+            state.apply_selection();
+        }
+
+        let recents = state.recent_models.get("a").unwrap();
+        assert_eq!(recents.len(), 10);
+        assert_eq!(recents[0], "m10", "most recently selected must be first");
+        assert!(!recents.contains(&"m0".to_string()), "the 11th-oldest selection must have been evicted");
+    }
+
+    #[test]
+    fn reselecting_an_existing_recent_moves_it_to_the_front_without_duplicating() {
+        let config = config_with(&[("a", &["m1", "m2"])]);
+        let mut state = AppState::new(config, &Last::default());
+        state.switch_focus();
+        state.model_cursor = 0;
+        state.apply_selection(); // recents: [m1]
+        state.model_cursor = state.models_for_focused_provider.iter().position(|m| m == "m2").unwrap();
+        state.apply_selection(); // recents: [m2, m1]
+        state.model_cursor = state.models_for_focused_provider.iter().position(|m| m == "m1").unwrap();
+        state.apply_selection(); // m1 re-selected: should move to front, not duplicate
+
+        assert_eq!(state.recent_models.get("a"), Some(&vec!["m1".to_string(), "m2".to_string()]));
+    }
+
+    #[test]
+    fn remove_focused_model_from_recents_unpins_without_touching_config() {
+        let config = config_with(&[("a", &["m1", "m2"])]);
+        let mut state = AppState::new(config, &Last::default());
+        state.switch_focus();
+        state.model_cursor = 0;
+        state.apply_selection(); // recents: [m1], panel reorders to [m1, m2]
+        state.refresh_focused_provider_models();
+        assert_eq!(state.models_for_focused_provider, vec!["m1", "m2"]);
+        state.model_cursor = 0; // highlight m1, currently the recent
+
+        state.remove_focused_model_from_recents();
+
+        assert!(state.recent_models.get("a").is_none_or(|r| r.is_empty()));
+        assert_eq!(state.config.providers["a"].models, vec!["m1", "m2"], "config must be untouched");
+        assert_eq!(state.models_for_focused_provider, vec!["m1", "m2"]);
+    }
+
+    #[test]
+    fn remove_focused_model_from_recents_is_a_no_op_when_not_a_recent() {
+        let config = config_with(&[("a", &["m1", "m2"])]);
+        let mut state = AppState::new(config, &Last::default());
+        state.switch_focus();
+
+        state.remove_focused_model_from_recents();
+
+        assert!(state.status_message.is_some());
+        assert_eq!(state.models_for_focused_provider, vec!["m1", "m2"]);
     }
 
     #[test]

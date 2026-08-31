@@ -54,6 +54,7 @@ Python original's `Path.home() / ".config" / ...`).
 | `n` | Launch Claude (native mode — no env override, no `--model`) |
 | `a` | Add a model to the focused provider (opens modal) |
 | `x` | Remove the focused model |
+| `X` (Shift+X) | Unpin the focused model from Recents (no-op if it isn't one) |
 | `s` | Set API key for the focused provider (opens masked modal) |
 | `/` | Search/filter the Models panel (case-insensitive substring match) |
 | `r` | Toggle RTK mode |
@@ -106,3 +107,13 @@ Models does too, so search state can never point at a stale list.
     (native mode has no selected model to look up). `ui.rs` uses the same discovered-then-static
     priority to render a `[1M]`/`[200K]`-style badge (`format_context_tokens`) next to any model
     with a known window.
+- Recents: `AppState::recent_models` (`IndexMap<String, Vec<String>>`, provider -> up to 10
+  model names newest-first, mirrors `config::Last.recent_models`) is pure usage history — it
+  never touches `config::Provider.models`. `apply_selection` calls `record_recent_model` on
+  every successful `Enter`. `replace_focused_provider_models` calls `reorder_by_recents` so
+  recents-that-are-still-present always sort to the front of both
+  `all_models_for_focused_provider` and (since search filters from that) `models_for_focused_provider`
+  — no separate "section" tracking needed, search and cursor indexing work unmodified.
+  `remove_focused_model_from_recents` (bound to `X`) mutates only `recent_models`, then re-runs
+  the same reorder/filter to refresh the panel. `ui.rs` marks a recent with a `★ ` prefix by
+  checking membership against `state.recent_models[focused_provider]` at render time.

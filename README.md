@@ -21,6 +21,7 @@ claude-code-swapper
 - `n` — launch Claude natively (no provider override — uses your normal login/config)
 - `a` — add a model to the focused provider
 - `x` — remove the highlighted model
+- `X` (Shift+X) — unpin the highlighted model from Recents (see below); does nothing if it isn't one
 - `s` — set the API key for the focused provider
 - `/` — search/filter the Models panel (useful for providers with a large catalog, like OpenRouter)
 - `r` — toggle RTK mode
@@ -79,6 +80,12 @@ providers:
 ```
 
 Models without either an auto-discovered or a configured entry are unaffected — Claude Code falls back to its own detection (or the 200k default). This only applies to proxy-mode launches (`l`); native mode (`n`) uses your own Claude Code config as-is.
+
+### Recents
+
+Every time you select a model (`Enter`), it's remembered per-provider — up to the 10 most recent, newest first — and shown at the top of the Models panel with a `★` marker, ahead of the rest of the list. Handy for a large catalog like OpenRouter's, where you'd otherwise have to scroll or search for a model you already use regularly.
+
+This is pure usage history: it's stored in `~/.config/claude-code-swapper/last.yaml`, never written to `config.yaml`, and doesn't require adding anything to a provider's static `models:` list — it works the same whether a model came from live discovery or the config file. Press `X` (Shift+X) on a highlighted recent to unpin it; this only forgets it, it doesn't remove the model from anywhere else.
 
 ## RTK
 

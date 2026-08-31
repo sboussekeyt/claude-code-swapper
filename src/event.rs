@@ -98,6 +98,10 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent, config_path: &Path, last_
             state.remove_focused_model();
             config::save_config(&state.config, config_path);
         }
+        (KeyCode::Char('X'), m) if m == KeyModifiers::NONE || m == KeyModifiers::SHIFT => {
+            state.remove_focused_model_from_recents();
+            save_current_last(state, last_path);
+        }
         (KeyCode::Char('s'), KeyModifiers::NONE) => state.open_set_api_key_modal(),
         (KeyCode::Char('/'), KeyModifiers::NONE) => state.start_search(),
         (KeyCode::Char('r'), KeyModifiers::NONE) => {
@@ -132,6 +136,7 @@ fn save_current_last(state: &AppState, last_path: &Path) {
         model: state.current_model.clone(),
         rtk_enabled: state.rtk_enabled,
         auto_accept: state.auto_accept,
+        recent_models: state.recent_models.clone(),
     };
     config::save_last(&last, last_path);
 }
@@ -424,5 +429,39 @@ mod tests {
         assert_eq!(state.current_model.as_deref(), Some("claude"));
         let saved = config::load_last(&last_path);
         assert_eq!(saved.model.as_deref(), Some("claude"));
+    }
+
+    #[test]
+    fn shift_x_removes_the_highlighted_model_from_recents_and_persists() {
+        let mut state = state_with(&[("a", &["m1", "m2"])]);
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("c.yaml");
+        let last_path = dir.path().join("l.yaml");
+
+        handle_key(&mut state, key(KeyCode::Tab), &config_path, &last_path); // focus Models
+        handle_key(&mut state, key(KeyCode::Enter), &config_path, &last_path); // select m1 -> recents
+        assert_eq!(state.recent_models.get("a"), Some(&vec!["m1".to_string()]));
+
+        handle_key(&mut state, key(KeyCode::Char('X')), &config_path, &last_path);
+
+        assert!(state.recent_models.get("a").is_none_or(|r| r.is_empty()));
+        assert_eq!(state.config.providers["a"].models, vec!["m1", "m2"], "config must be untouched");
+        let saved = config::load_last(&last_path);
+        assert!(saved.recent_models.get("a").is_none_or(|r| r.is_empty()));
+    }
+
+    #[test]
+    fn shift_x_during_search_types_into_the_query_instead() {
+        let mut state = state_with(&[("a", &["Xmodel", "other"])]);
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("c.yaml");
+        let last_path = dir.path().join("l.yaml");
+
+        handle_key(&mut state, key(KeyCode::Tab), &config_path, &last_path);
+        handle_key(&mut state, key(KeyCode::Char('/')), &config_path, &last_path);
+        handle_key(&mut state, key(KeyCode::Char('X')), &config_path, &last_path);
+
+        assert_eq!(state.search_query, "X");
+        assert_eq!(state.models_for_focused_provider, vec!["Xmodel"]);
     }
 }

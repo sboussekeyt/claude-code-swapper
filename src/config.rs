@@ -31,6 +31,10 @@ pub struct Last {
     pub rtk_enabled: bool,
     #[serde(default)]
     pub auto_accept: bool,
+    /// Up to 10 most-recently-selected model names per provider, newest
+    /// first. Usage history only — never affects config::Provider.models.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub recent_models: IndexMap<String, Vec<String>>,
 }
 
 pub enum LoadConfigOutcome {
@@ -205,11 +209,14 @@ providers:
     fn save_last_round_trips_and_creates_parent_dirs() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("nested").join("last.yaml");
+        let mut recent_models = IndexMap::new();
+        recent_models.insert("openrouter".to_string(), vec!["model-a".to_string(), "model-b".to_string()]);
         let last = Last {
             provider: Some("groq".to_string()),
             model: Some("llama-3.1-8b-instant".to_string()),
             rtk_enabled: true,
             auto_accept: false,
+            recent_models,
         };
 
         save_last(&last, &path);

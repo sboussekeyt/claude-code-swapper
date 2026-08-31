@@ -13,6 +13,7 @@ const OFF_COLOR: Color = Color::Red;
 const BADGE_COLOR: Color = Color::Green;
 const SEARCH_ACCENT: Color = Color::Yellow;
 const WARN_COLOR: Color = Color::Yellow;
+const RECENT_COLOR: Color = Color::Magenta;
 
 pub fn render(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
@@ -116,6 +117,7 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
         .focused_provider()
         .and_then(|p| state.config.providers.get(p))
         .map(|p| &p.context_windows);
+    let recents = state.focused_provider().and_then(|p| state.recent_models.get(p));
     let model_items: Vec<ListItem> = state
         .models_for_focused_provider
         .iter()
@@ -132,18 +134,20 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
                 .discovered_context_windows
                 .get(m)
                 .or_else(|| static_context_windows.and_then(|w| w.get(m)));
-            let line = match context_window {
-                Some(tokens) => Line::from(vec![
-                    Span::raw(m.as_str()),
-                    Span::raw("  "),
-                    Span::styled(
-                        format!("[{}]", format_context_tokens(*tokens)),
-                        Style::default().fg(BADGE_COLOR).add_modifier(Modifier::BOLD),
-                    ),
-                ]),
-                None => Line::from(m.as_str()),
-            };
-            ListItem::new(line).style(style)
+            let is_recent = recents.is_some_and(|r| r.iter().any(|x| x == m));
+            let mut spans = Vec::new();
+            if is_recent {
+                spans.push(Span::styled("★ ", Style::default().fg(RECENT_COLOR).add_modifier(Modifier::BOLD)));
+            }
+            spans.push(Span::raw(m.as_str()));
+            if let Some(tokens) = context_window {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    format!("[{}]", format_context_tokens(*tokens)),
+                    Style::default().fg(BADGE_COLOR).add_modifier(Modifier::BOLD),
+                ));
+            }
+            ListItem::new(Line::from(spans)).style(style)
         })
         .collect();
     let models_border = panel_border_style(models_focused);
@@ -227,6 +231,7 @@ const FOOTER_KEYS: &[(&str, &str)] = &[
     ("n", "native"),
     ("a", "add"),
     ("x", "remove"),
+    ("X", "unrecent"),
     ("s", "api key"),
     ("r", "rtk"),
     ("p", "auto-accept"),
@@ -576,6 +581,37 @@ mod tests {
         let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
         assert!(content.contains("[1M]"), "expected the discovered window (1M), not the static 200K one");
         assert!(!content.contains("[200K]"));
+    }
+
+    #[test]
+    fn recent_models_render_first_with_a_star_marker() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "a".to_string(),
+            Provider {
+                base_url: "https://a.example.com".to_string(),
+                api_key: "key".to_string(),
+                models: vec!["m1".to_string(), "m2".to_string(), "m3".to_string()],
+                ..Default::default()
+            },
+        );
+        let mut recent_models = IndexMap::new();
+        recent_models.insert("a".to_string(), vec!["m3".to_string()]);
+        let last = Last { recent_models, ..Default::default() };
+        let mut state = AppState::new(Config { providers }, &last);
+        state.switch_focus();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &state)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        assert!(content.contains('★'), "expected a recent-model marker to render");
+
+        // m3 (the recent) must appear before m1/m2 in the rendered order.
+        let row3: String = (0..80).map(|x| buffer.cell((x, 4)).unwrap().symbol()).collect();
+        assert!(row3.contains("m3"), "expected the recent model on the first Models row, got: {row3:?}");
     }
 
     #[test]
