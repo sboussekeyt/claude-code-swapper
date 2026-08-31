@@ -12,7 +12,7 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         .constraints([
             Constraint::Length(3),
             Constraint::Min(3),
-            Constraint::Length(3),
+            Constraint::Length(4),
         ])
         .split(area);
 
@@ -212,15 +212,23 @@ mod tests {
 
     #[test]
     fn render_with_open_modal_clears_area_beneath_it() {
-        // A model name wide/long enough that, if the modal didn't clear its
-        // background first, its glyphs would bleed through into the popup area.
+        // The popup renders at rows 10-12 (top/bottom border) with its single
+        // interior content row at row 11, columns 10-70, on an 80x24 backend
+        // (see popup Rect math in render_modal). The modal's own Paragraph is
+        // empty (freshly-opened Add Model input), so it writes no glyphs of
+        // its own into that interior row — only Clear stands between it and
+        // whatever was drawn there before. Put the marker as item index 7 in
+        // the Models list so it lands at row 4+7=11 — the popup's interior
+        // row, not a border row the Block would overwrite regardless of Clear.
         let mut providers = IndexMap::new();
+        let mut models: Vec<String> = (0..7).map(|i| format!("filler-{i}")).collect();
+        models.push("bleed-marker".to_string());
         providers.insert(
             "lmstudio".to_string(),
             Provider {
                 base_url: "http://localhost:1234".to_string(),
                 api_key: "lm-studio".to_string(),
-                models: vec!["ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ-bleed-marker".to_string()],
+                models,
             },
         );
         let mut state = AppState::new(Config { providers }, &Last::default());

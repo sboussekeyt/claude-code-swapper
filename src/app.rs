@@ -91,16 +91,7 @@ impl AppState {
     }
 
     pub fn set_focused_provider_models(&mut self, models: Vec<String>) {
-        self.model_cursor = 0;
-        if let Some(current) = &self.current_model {
-            if self.focused_provider() == self.current_provider.as_deref() {
-                if let Some(idx) = models.iter().position(|m| m == current) {
-                    self.model_cursor = idx;
-                }
-            }
-        }
-        self.models_for_focused_provider = models;
-        self.models_are_discovered = true;
+        self.replace_focused_provider_models(models, true);
     }
 
     pub fn refresh_focused_provider_models(&mut self) {
@@ -109,6 +100,10 @@ impl AppState {
             .and_then(|p| self.config.providers.get(p))
             .map(|p| p.models.clone())
             .unwrap_or_default();
+        self.replace_focused_provider_models(models, false);
+    }
+
+    fn replace_focused_provider_models(&mut self, models: Vec<String>, discovered: bool) {
         self.model_cursor = 0;
         if let Some(current) = &self.current_model {
             if self.focused_provider() == self.current_provider.as_deref() {
@@ -118,7 +113,7 @@ impl AppState {
             }
         }
         self.models_for_focused_provider = models;
-        self.models_are_discovered = false;
+        self.models_are_discovered = discovered;
     }
 
     pub fn apply_selection(&mut self) -> bool {
@@ -153,6 +148,8 @@ impl AppState {
         p.models.push(model_name.to_string());
         if !self.models_are_discovered {
             self.refresh_focused_provider_models();
+        } else {
+            self.status_message = Some(format!("Added '{model_name}' to config (list stays live)."));
         }
         true
     }
@@ -166,10 +163,10 @@ impl AppState {
         }
         if !self.models_are_discovered {
             self.refresh_focused_provider_models();
-        } else if !removed {
-            self.status_message = Some(format!(
-                "'{model_name}' is discovered live and isn't in the static config, so nothing was removed."
-            ));
+        } else if removed {
+            self.status_message = Some(format!("Removed '{model_name}' from config (list stays live)."));
+        } else {
+            self.status_message = Some(format!("'{model_name}' isn't in the static config; nothing removed."));
         }
     }
 
@@ -501,6 +498,42 @@ mod tests {
         state.remove_model("a", "disc-2");
         assert_eq!(state.models_for_focused_provider, discovered);
         assert!(state.status_message.is_some());
+    }
+
+    #[test]
+    fn add_model_on_discovered_list_edits_config_without_clobbering_panel_and_sets_message() {
+        let config = config_with(&[("a", &["static-model"])]);
+        let mut state = AppState::new(config, &Last::default());
+        let discovered = vec!["disc-1".to_string(), "disc-2".to_string()];
+        state.set_focused_provider_models(discovered.clone());
+
+        assert!(state.add_model("a", "brand-new"));
+
+        assert_eq!(state.models_for_focused_provider, discovered);
+        assert!(state.models_are_discovered);
+        assert_eq!(state.config.providers["a"].models, vec!["static-model", "brand-new"]);
+        assert!(
+            state.status_message.is_some(),
+            "user must be told the config changed even though the visible list didn't"
+        );
+    }
+
+    #[test]
+    fn remove_model_on_discovered_list_edits_config_without_clobbering_panel_and_sets_message() {
+        let config = config_with(&[("a", &["static-model"])]);
+        let mut state = AppState::new(config, &Last::default());
+        let discovered = vec!["static-model".to_string(), "disc-1".to_string()];
+        state.set_focused_provider_models(discovered.clone());
+
+        state.remove_model("a", "static-model");
+
+        assert_eq!(state.models_for_focused_provider, discovered);
+        assert!(state.models_are_discovered);
+        assert!(state.config.providers["a"].models.is_empty());
+        assert!(
+            state.status_message.is_some(),
+            "user must be told the config changed even though the visible list didn't"
+        );
     }
 
     #[test]
