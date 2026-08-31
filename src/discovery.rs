@@ -1,18 +1,25 @@
 use serde::Deserialize;
 use std::time::Duration;
 
+/// One entry from a provider's `/v1/models` listing. `context_length` is not
+/// part of the strict OpenAI schema, but OpenRouter's OpenAI-compatible
+/// endpoint includes it anyway; providers that don't report it (LM Studio,
+/// Ollama, ...) simply leave it `None`, and the caller falls back to a
+/// manually configured `context_windows` entry.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct DiscoveredModel {
+    pub id: String,
+    #[serde(default)]
+    pub context_length: Option<u64>,
+}
+
 #[derive(Deserialize)]
 struct ModelsResponse {
     #[serde(default)]
-    data: Vec<ModelEntry>,
+    data: Vec<DiscoveredModel>,
 }
 
-#[derive(Deserialize)]
-struct ModelEntry {
-    id: String,
-}
-
-pub fn fetch_remote_models(base_url: &str, api_key: &str, timeout: Duration) -> Option<Vec<String>> {
+pub fn fetch_remote_models(base_url: &str, api_key: &str, timeout: Duration) -> Option<Vec<DiscoveredModel>> {
     let url = format!("{}/v1/models", base_url.trim_end_matches('/'));
     let agent = ureq::AgentBuilder::new().timeout(timeout).build();
     let response = agent
@@ -24,9 +31,9 @@ pub fn fetch_remote_models(base_url: &str, api_key: &str, timeout: Duration) -> 
     if parsed.data.is_empty() {
         return None;
     }
-    let mut ids: Vec<String> = parsed.data.into_iter().map(|m| m.id).collect();
-    ids.sort();
-    Some(ids)
+    let mut models = parsed.data;
+    models.sort_by(|a, b| a.id.cmp(&b.id));
+    Some(models)
 }
 
 #[cfg(test)]
@@ -61,7 +68,22 @@ mod tests {
     fn returns_sorted_model_ids_on_success() {
         let (base_url, _rx) = serve_once(r#"{"data":[{"id":"b-model"},{"id":"a-model"}]}"#);
         let result = fetch_remote_models(&base_url, "lm-studio", Duration::from_secs(2));
-        assert_eq!(result, Some(vec!["a-model".to_string(), "b-model".to_string()]));
+        assert_eq!(
+            result,
+            Some(vec![
+                DiscoveredModel { id: "a-model".to_string(), context_length: None },
+                DiscoveredModel { id: "b-model".to_string(), context_length: None },
+            ])
+        );
+    }
+
+    #[test]
+    fn parses_context_length_when_the_provider_reports_it() {
+        let (base_url, _rx) =
+            serve_once(r#"{"data":[{"id":"big","context_length":1310720},{"id":"small"}]}"#);
+        let result = fetch_remote_models(&base_url, "key", Duration::from_secs(2)).unwrap();
+        assert_eq!(result[0], DiscoveredModel { id: "big".to_string(), context_length: Some(1_310_720) });
+        assert_eq!(result[1], DiscoveredModel { id: "small".to_string(), context_length: None });
     }
 
     #[test]

@@ -112,7 +112,7 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
     };
 
     let models_focused = state.focused_panel == Panel::Models;
-    let focused_context_windows = state
+    let static_context_windows = state
         .focused_provider()
         .and_then(|p| state.config.providers.get(p))
         .map(|p| &p.context_windows);
@@ -126,7 +126,13 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
             } else {
                 Style::default()
             };
-            let line = match focused_context_windows.and_then(|w| w.get(m)) {
+            // A live-discovered window (e.g. OpenRouter's context_length)
+            // is more current than a hand-configured one, so it wins.
+            let context_window = state
+                .discovered_context_windows
+                .get(m)
+                .or_else(|| static_context_windows.and_then(|w| w.get(m)));
+            let line = match context_window {
                 Some(tokens) => Line::from(vec![
                     Span::raw(m.as_str()),
                     Span::raw("  "),
@@ -538,6 +544,38 @@ mod tests {
         let buffer = terminal.backend().buffer();
         let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
         assert!(content.contains("[1M]"), "expected the configured context window to render as a suffix");
+    }
+
+    #[test]
+    fn discovered_context_window_takes_priority_over_the_static_config_entry() {
+        let mut context_windows = IndexMap::new();
+        context_windows.insert("model-a".to_string(), 200_000u64);
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "openrouter".to_string(),
+            Provider {
+                base_url: "https://openrouter.example.com".to_string(),
+                api_key: "key".to_string(),
+                models: vec!["model-a".to_string()],
+                context_windows,
+            },
+        );
+        let mut state = AppState::new(Config { providers }, &Last::default());
+        // A live discovery response reports a different (more current)
+        // window for the same model — it must win over the stale static one.
+        state.set_discovered_models(vec![crate::discovery::DiscoveredModel {
+            id: "model-a".to_string(),
+            context_length: Some(1_000_000),
+        }]);
+
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &state)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        assert!(content.contains("[1M]"), "expected the discovered window (1M), not the static 200K one");
+        assert!(!content.contains("[200K]"));
     }
 
     #[test]

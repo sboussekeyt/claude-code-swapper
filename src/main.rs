@@ -91,7 +91,13 @@ fn main() {
             let provider = state.current_provider.clone().unwrap();
             let model = state.current_model.clone().unwrap();
             let provider_cfg = &state.config.providers[&provider];
-            let context_tokens = provider_cfg.context_windows.get(&model).copied();
+            // A live-discovered window (e.g. OpenRouter's context_length) is
+            // more current than a hand-configured one, so it wins.
+            let context_tokens = state
+                .discovered_context_windows
+                .get(&model)
+                .copied()
+                .or_else(|| provider_cfg.context_windows.get(&model).copied());
             if state.rtk_enabled {
                 launcher::ensure_rtk_hook();
             }

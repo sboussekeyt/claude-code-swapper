@@ -1,4 +1,6 @@
 use crate::config::{Config, Last};
+use crate::discovery::DiscoveredModel;
+use indexmap::IndexMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Panel {
@@ -24,6 +26,12 @@ pub struct AppState {
     /// Search filters from this; it's untouched by typing a query.
     pub all_models_for_focused_provider: Vec<String>,
     pub models_are_discovered: bool,
+    /// Context window per model name, populated only when discovery's last
+    /// response reported one (e.g. OpenRouter). Takes priority over a
+    /// provider's static `config::Provider.context_windows` at launch and
+    /// in the Models panel badge — see `set_discovered_models`. Reset
+    /// whenever the model list is replaced (provider switch, re-discovery).
+    pub discovered_context_windows: IndexMap<String, u64>,
     pub search_active: bool,
     pub search_query: String,
     pub current_provider: Option<String>,
@@ -58,6 +66,7 @@ impl AppState {
             models_for_focused_provider: Vec::new(),
             all_models_for_focused_provider: Vec::new(),
             models_are_discovered: false,
+            discovered_context_windows: IndexMap::new(),
             search_active: false,
             search_query: String::new(),
             current_provider,
@@ -107,6 +116,19 @@ impl AppState {
         self.replace_focused_provider_models(models, true);
     }
 
+    /// Like `set_focused_provider_models`, but for a live discovery response
+    /// that may carry a per-model context window — captures it into
+    /// `discovered_context_windows` so it can override a static config entry.
+    pub fn set_discovered_models(&mut self, models: Vec<DiscoveredModel>) {
+        let context_windows: IndexMap<String, u64> = models
+            .iter()
+            .filter_map(|m| m.context_length.map(|c| (m.id.clone(), c)))
+            .collect();
+        let names: Vec<String> = models.into_iter().map(|m| m.id).collect();
+        self.set_focused_provider_models(names);
+        self.discovered_context_windows = context_windows;
+    }
+
     pub fn refresh_focused_provider_models(&mut self) {
         let models = self
             .focused_provider()
@@ -130,6 +152,7 @@ impl AppState {
         self.all_models_for_focused_provider = models.clone();
         self.models_for_focused_provider = models;
         self.models_are_discovered = discovered;
+        self.discovered_context_windows = IndexMap::new();
     }
 
     /// Enter search mode for the Models panel. No-op outside it — search only
@@ -409,6 +432,40 @@ mod tests {
         let mut state = AppState::new(config, &last);
         state.set_focused_provider_models(vec!["m1".to_string(), "m2".to_string(), "m3".to_string()]);
         assert_eq!(state.model_cursor, 2);
+    }
+
+    #[test]
+    fn set_discovered_models_captures_context_windows_reported_by_discovery() {
+        let config = config_with(&[("a", &["m1"])]);
+        let mut state = AppState::new(config, &Last::default());
+
+        state.set_discovered_models(vec![
+            DiscoveredModel { id: "big".to_string(), context_length: Some(1_310_720) },
+            DiscoveredModel { id: "small".to_string(), context_length: None },
+        ]);
+
+        assert_eq!(state.models_for_focused_provider, vec!["big", "small"]);
+        assert_eq!(state.discovered_context_windows.get("big"), Some(&1_310_720));
+        assert_eq!(state.discovered_context_windows.get("small"), None);
+    }
+
+    #[test]
+    fn discovered_context_windows_reset_when_the_model_list_is_replaced() {
+        let config = config_with(&[("a", &["m1"]), ("b", &["m2"])]);
+        let mut state = AppState::new(config, &Last::default());
+        state.set_discovered_models(vec![DiscoveredModel {
+            id: "m1".to_string(),
+            context_length: Some(1_000_000),
+        }]);
+        assert!(!state.discovered_context_windows.is_empty());
+
+        // event.rs re-runs refresh_focused_provider_models after moving the
+        // provider cursor (the static fallback path pending fresh
+        // discovery), which must invalidate the stale discovery map.
+        state.move_cursor(1);
+        state.refresh_focused_provider_models();
+
+        assert!(state.discovered_context_windows.is_empty());
     }
 
     #[test]

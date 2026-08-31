@@ -89,10 +89,20 @@ Models does too, so search state can never point at a stale list.
   the whole program.
 - Key events are filtered to `KeyEventKind::Press` — some terminals/platforms also emit
   `Release`/`Repeat` events, which must not double-fire actions.
-- `config::Provider.context_windows` (`IndexMap<String, u64>`, keyed by model name, empty by
-  default via `#[serde(default)]`) is looked up in `main.rs`'s `Action::Launch` arm and passed
-  to `launcher::build_env`, which sets `CLAUDE_CODE_MAX_CONTEXT_TOKENS` when present — works
-  around Claude Code assuming a 200k window for models it doesn't recognize by name. Only
-  applies to proxy-mode launches (native mode has no selected model to look up). `ui.rs`
-  renders a `[1M]`/`[200K]`-style suffix (`format_context_tokens`) next to any model that has
-  an entry.
+- Context window resolution works around Claude Code assuming a 200k window for models it
+  doesn't recognize by name — two sources, discovered wins:
+  - `discovery::DiscoveredModel.context_length` — OpenRouter's `/v1/models` reports this field
+    even though it's not part of the strict OpenAI schema; providers that don't (LM Studio,
+    Ollama) just leave it `None`. `event::refresh_discovery` calls
+    `AppState::set_discovered_models`, which captures it into
+    `AppState::discovered_context_windows` (`IndexMap<String, u64>`), reset by
+    `replace_focused_provider_models` on every provider switch/re-discovery so it can't go
+    stale.
+  - `config::Provider.context_windows` (`IndexMap<String, u64>`, keyed by model name, empty by
+    default via `#[serde(default)]`) — the manual fallback for providers that don't report it.
+  - Both are looked up in `main.rs`'s `Action::Launch` arm (`discovered_context_windows` first,
+    falling back to `context_windows`) and passed to `launcher::build_env`, which sets
+    `CLAUDE_CODE_MAX_CONTEXT_TOKENS` when either resolved. Only applies to proxy-mode launches
+    (native mode has no selected model to look up). `ui.rs` uses the same discovered-then-static
+    priority to render a `[1M]`/`[200K]`-style badge (`format_context_tokens`) next to any model
+    with a known window.

@@ -61,7 +61,11 @@ Adding a new provider = adding a new block. No code changes needed. This also co
 
 ### Context window for unrecognized models
 
-Claude Code assumes a 200k-token context window for any model it doesn't recognize by name, which makes auto-compact trigger too early for models with a larger real window (e.g. a 1M-token model). Declare the real size per model under an optional `context_windows` map on the provider:
+Claude Code assumes a 200k-token context window for any model it doesn't recognize by name, which makes auto-compact trigger too early for models with a larger real window (e.g. a 1M-token model).
+
+**Auto-discovered (no config needed):** when a provider's `/v1/models` response includes `context_length` — OpenRouter's does — claude-code-swapper picks it up automatically every time you browse to that provider, no manual step required. The Models panel shows a `[1M]`/`[200K]`-style badge next to any model with a known window, and launching it (`l`) sets `CLAUDE_CODE_MAX_CONTEXT_TOKENS` for you.
+
+**Manual fallback:** for providers that don't report `context_length` in their `/v1/models` response (LM Studio, Ollama, and some direct provider APIs), declare it yourself under an optional `context_windows` map — it's only used when nothing was auto-discovered for that model:
 
 ```yaml
 providers:
@@ -74,7 +78,7 @@ providers:
       deepseek/deepseek-v4-flash-0731: 1000000
 ```
 
-When you launch a model listed here, `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is set to that value automatically, and the Models panel shows a `[1M]`/`[200K]`-style suffix next to it. Models without an entry are unaffected — Claude Code falls back to its own detection (or the 200k default). This only applies to proxy-mode launches (`l`); native mode (`n`) uses your own Claude Code config as-is.
+Models without either an auto-discovered or a configured entry are unaffected — Claude Code falls back to its own detection (or the 200k default). This only applies to proxy-mode launches (`l`); native mode (`n`) uses your own Claude Code config as-is.
 
 ## RTK
 

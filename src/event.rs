@@ -30,7 +30,7 @@ pub fn refresh_discovery(state: &mut AppState) {
     };
     let discovered = discovery::fetch_remote_models(&cfg.base_url, &cfg.api_key, Duration::from_millis(1500));
     match discovered {
-        Some(models) if !models.is_empty() => state.set_focused_provider_models(models),
+        Some(models) if !models.is_empty() => state.set_discovered_models(models),
         _ => state.refresh_focused_provider_models(),
     }
 }
