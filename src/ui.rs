@@ -9,7 +9,7 @@ const ACCENT: Color = Color::Cyan;
 const HEADER_ACCENT: Color = Color::Magenta;
 const MUTED: Color = Color::DarkGray;
 const ON_COLOR: Color = Color::Green;
-const OFF_COLOR: Color = Color::DarkGray;
+const OFF_COLOR: Color = Color::Red;
 const BADGE_COLOR: Color = Color::Green;
 const SEARCH_ACCENT: Color = Color::Yellow;
 const WARN_COLOR: Color = Color::Yellow;
@@ -61,7 +61,7 @@ fn on_off_span(enabled: bool) -> Span<'static> {
     if enabled {
         Span::styled("ON", Style::default().fg(ON_COLOR).add_modifier(Modifier::BOLD))
     } else {
-        Span::styled("OFF", Style::default().fg(OFF_COLOR))
+        Span::styled("OFF", Style::default().fg(OFF_COLOR).add_modifier(Modifier::BOLD))
     }
 }
 
