@@ -2,7 +2,9 @@ use crate::app::AppState;
 use crate::config;
 use crate::config::Last;
 use crate::discovery;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent};
+#[cfg(test)]
+use crossterm::event::KeyModifiers;
 use std::path::Path;
 use std::time::Duration;
 
@@ -70,17 +72,17 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent, config_path: &Path, last_
             config::save_config(&state.config, config_path);
         }
         KeyCode::Char('s') => state.open_set_api_key_modal(),
-        KeyCode::Char('r') => state.toggle_rtk(),
-        KeyCode::Char('p') => state.toggle_auto_accept(),
+        KeyCode::Char('r') => {
+            state.toggle_rtk();
+            save_current_last(state, last_path);
+        }
+        KeyCode::Char('p') => {
+            state.toggle_auto_accept();
+            save_current_last(state, last_path);
+        }
         KeyCode::Enter => {
             if state.apply_selection() {
-                let last = Last {
-                    provider: state.current_provider.clone(),
-                    model: state.current_model.clone(),
-                    rtk_enabled: state.rtk_enabled,
-                    auto_accept: state.auto_accept,
-                };
-                config::save_last(&last, last_path);
+                save_current_last(state, last_path);
             }
         }
         KeyCode::Char('l') if state.can_launch() => return Action::Launch,
@@ -91,6 +93,17 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent, config_path: &Path, last_
     Action::Continue
 }
 
+fn save_current_last(state: &AppState, last_path: &Path) {
+    let last = Last {
+        provider: state.current_provider.clone(),
+        model: state.current_model.clone(),
+        rtk_enabled: state.rtk_enabled,
+        auto_accept: state.auto_accept,
+    };
+    config::save_last(&last, last_path);
+}
+
+#[cfg(test)]
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
@@ -161,6 +174,34 @@ mod tests {
         let saved = config::load_last(&last_path);
         assert_eq!(saved.provider.as_deref(), Some("a"));
         assert_eq!(saved.model.as_deref(), Some("m1"));
+    }
+
+    #[test]
+    fn r_toggles_rtk_and_persists_last_yaml() {
+        let mut state = state_with(&[("a", &["m1"])]);
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("c.yaml");
+        let last_path = dir.path().join("l.yaml");
+
+        handle_key(&mut state, key(KeyCode::Char('r')), &config_path, &last_path);
+
+        assert!(state.rtk_enabled);
+        let saved = config::load_last(&last_path);
+        assert!(saved.rtk_enabled);
+    }
+
+    #[test]
+    fn p_toggles_auto_accept_and_persists_last_yaml() {
+        let mut state = state_with(&[("a", &["m1"])]);
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("c.yaml");
+        let last_path = dir.path().join("l.yaml");
+
+        handle_key(&mut state, key(KeyCode::Char('p')), &config_path, &last_path);
+
+        assert!(state.auto_accept);
+        let saved = config::load_last(&last_path);
+        assert!(saved.auto_accept);
     }
 
     #[test]

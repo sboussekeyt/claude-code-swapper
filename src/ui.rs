@@ -1,6 +1,6 @@
 use crate::app::{AppState, Modal, Panel};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
@@ -43,24 +43,21 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
         .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(area);
 
+    let providers_focused = state.focused_panel == Panel::Providers;
     let provider_items: Vec<ListItem> = state
         .providers
         .iter()
         .enumerate()
         .map(|(i, p)| {
             let style = if i == state.provider_cursor {
-                Style::default().add_modifier(Modifier::REVERSED)
+                cursor_style(providers_focused)
             } else {
                 Style::default()
             };
             ListItem::new(Line::from(p.as_str())).style(style)
         })
         .collect();
-    let providers_border = if state.focused_panel == Panel::Providers {
-        Style::default().add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
+    let providers_border = panel_border_style(providers_focused);
     let mut provider_state = ListState::default().with_selected(Some(state.provider_cursor));
     frame.render_stateful_widget(
         List::new(provider_items).block(
@@ -73,24 +70,21 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
         &mut provider_state,
     );
 
+    let models_focused = state.focused_panel == Panel::Models;
     let model_items: Vec<ListItem> = state
         .models_for_focused_provider
         .iter()
         .enumerate()
         .map(|(i, m)| {
             let style = if i == state.model_cursor {
-                Style::default().add_modifier(Modifier::REVERSED)
+                cursor_style(models_focused)
             } else {
                 Style::default()
             };
             ListItem::new(Line::from(m.as_str())).style(style)
         })
         .collect();
-    let models_border = if state.focused_panel == Panel::Models {
-        Style::default().add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
+    let models_border = panel_border_style(models_focused);
     let mut model_state = ListState::default().with_selected(Some(state.model_cursor));
     frame.render_stateful_widget(
         List::new(model_items).block(
@@ -102,6 +96,25 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
         panels[1],
         &mut model_state,
     );
+}
+
+fn panel_border_style(focused: bool) -> Style {
+    if focused {
+        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    }
+}
+
+fn cursor_style(panel_focused: bool) -> Style {
+    if panel_focused {
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().add_modifier(Modifier::REVERSED)
+    }
 }
 
 fn render_footer(frame: &mut Frame, area: Rect) {
