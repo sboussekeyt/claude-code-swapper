@@ -1,9 +1,18 @@
 use crate::app::{AppState, Modal, Panel};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
+
+const ACCENT: Color = Color::Cyan;
+const HEADER_ACCENT: Color = Color::Magenta;
+const MUTED: Color = Color::DarkGray;
+const ON_COLOR: Color = Color::Green;
+const OFF_COLOR: Color = Color::DarkGray;
+const BADGE_COLOR: Color = Color::Green;
+const SEARCH_ACCENT: Color = Color::Yellow;
+const WARN_COLOR: Color = Color::Yellow;
 
 pub fn render(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
@@ -28,13 +37,32 @@ pub fn render(frame: &mut Frame, state: &AppState) {
 fn render_status(frame: &mut Frame, state: &AppState, area: Rect) {
     let provider = state.current_provider.as_deref().unwrap_or("-");
     let model = state.current_model.as_deref().unwrap_or("-");
-    let text = format!(
-        "Provider: {provider}   Model: {model}   RTK: {}   Auto-accept: {}",
-        if state.rtk_enabled { "ON" } else { "OFF" },
-        if state.auto_accept { "ON" } else { "OFF" }
-    );
-    let block = Block::default().title("Claude Code Swapper").borders(Borders::ALL);
-    frame.render_widget(Paragraph::new(text).block(block), area);
+    let line = Line::from(vec![
+        Span::styled("Provider: ", Style::default().fg(MUTED)),
+        Span::styled(provider, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled("   Model: ", Style::default().fg(MUTED)),
+        Span::styled(model, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled("   RTK: ", Style::default().fg(MUTED)),
+        on_off_span(state.rtk_enabled),
+        Span::styled("   Auto-accept: ", Style::default().fg(MUTED)),
+        on_off_span(state.auto_accept),
+    ]);
+    let block = Block::default()
+        .title(Span::styled(
+            " Claude Code Swapper ",
+            Style::default().fg(HEADER_ACCENT).add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(HEADER_ACCENT));
+    frame.render_widget(Paragraph::new(line).block(block), area);
+}
+
+fn on_off_span(enabled: bool) -> Span<'static> {
+    if enabled {
+        Span::styled("ON", Style::default().fg(ON_COLOR).add_modifier(Modifier::BOLD))
+    } else {
+        Span::styled("OFF", Style::default().fg(OFF_COLOR))
+    }
 }
 
 fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
@@ -62,7 +90,7 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
     frame.render_stateful_widget(
         List::new(provider_items).block(
             Block::default()
-                .title("Providers")
+                .title(panel_title("Providers", providers_focused))
                 .borders(Borders::ALL)
                 .border_style(providers_border),
         ),
@@ -98,11 +126,18 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
             } else {
                 Style::default()
             };
-            let label = match focused_context_windows.and_then(|w| w.get(m)) {
-                Some(tokens) => format!("{m}  [{}]", format_context_tokens(*tokens)),
-                None => m.clone(),
+            let line = match focused_context_windows.and_then(|w| w.get(m)) {
+                Some(tokens) => Line::from(vec![
+                    Span::raw(m.as_str()),
+                    Span::raw("  "),
+                    Span::styled(
+                        format!("[{}]", format_context_tokens(*tokens)),
+                        Style::default().fg(BADGE_COLOR).add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                None => Line::from(m.as_str()),
             };
-            ListItem::new(Line::from(label)).style(style)
+            ListItem::new(line).style(style)
         })
         .collect();
     let models_border = panel_border_style(models_focused);
@@ -110,7 +145,7 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
     frame.render_stateful_widget(
         List::new(model_items).block(
             Block::default()
-                .title("Models")
+                .title(panel_title("Models", models_focused))
                 .borders(Borders::ALL)
                 .border_style(models_border),
         ),
@@ -153,11 +188,16 @@ fn format_rounded(tokens: u64, unit: u64, suffix: &str) -> String {
     }
 }
 
+fn panel_title(title: &str, focused: bool) -> Span<'static> {
+    let color = if focused { ACCENT } else { MUTED };
+    Span::styled(format!(" {title} "), Style::default().fg(color).add_modifier(Modifier::BOLD))
+}
+
 fn panel_border_style(focused: bool) -> Style {
     if focused {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
     } else {
-        Style::default()
+        Style::default().fg(MUTED)
     }
 }
 
@@ -165,24 +205,59 @@ fn cursor_style(panel_focused: bool) -> Style {
     if panel_focused {
         Style::default()
             .fg(Color::Black)
-            .bg(Color::Yellow)
+            .bg(SEARCH_ACCENT)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().add_modifier(Modifier::REVERSED)
+        Style::default().fg(Color::White).bg(MUTED)
     }
 }
 
-fn render_footer(frame: &mut Frame, state: &AppState, area: Rect) {
-    let text = if state.search_active {
-        "[type] filter  [↑/↓] move  [Enter] select  [Esc] cancel search".to_string()
-    } else {
-        let keys = "[Tab] switch  [↑/↓] move  [Enter] select  [/] search  [l] launch  [n] native  [a] add  [x] remove  [s] api key  [r] rtk  [p] auto-accept  [q] quit";
-        match &state.status_message {
-            Some(msg) => format!("{keys}\n[{msg}]"),
-            None => keys.to_string(),
+const FOOTER_KEYS: &[(&str, &str)] = &[
+    ("Tab", "switch"),
+    ("↑/↓", "move"),
+    ("Enter", "select"),
+    ("/", "search"),
+    ("l", "launch"),
+    ("n", "native"),
+    ("a", "add"),
+    ("x", "remove"),
+    ("s", "api key"),
+    ("r", "rtk"),
+    ("p", "auto-accept"),
+    ("q", "quit"),
+];
+
+const SEARCH_FOOTER_KEYS: &[(&str, &str)] =
+    &[("type", "filter"), ("↑/↓", "move"), ("Enter", "select"), ("Esc", "cancel search")];
+
+fn footer_key_spans(keys: &[(&str, &str)]) -> Vec<Span<'static>> {
+    let mut spans = Vec::with_capacity(keys.len() * 3);
+    for (i, (key, label)) in keys.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw("  "));
         }
+        spans.push(Span::styled(
+            format!("[{key}]"),
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(format!(" {label}"), Style::default().fg(MUTED)));
+    }
+    spans
+}
+
+fn render_footer(frame: &mut Frame, state: &AppState, area: Rect) {
+    let mut lines = if state.search_active {
+        vec![Line::from(footer_key_spans(SEARCH_FOOTER_KEYS))]
+    } else {
+        vec![Line::from(footer_key_spans(FOOTER_KEYS))]
     };
-    frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), area);
+    if let Some(msg) = &state.status_message {
+        lines.push(Line::from(Span::styled(
+            format!("[{msg}]"),
+            Style::default().fg(WARN_COLOR).add_modifier(Modifier::BOLD),
+        )));
+    }
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), area);
 }
 
 fn render_search_bar(frame: &mut Frame, state: &AppState, area: Rect) {
@@ -190,10 +265,16 @@ fn render_search_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     // not an overlay — so the filtered list underneath is never obscured.
     let text = format!("{}_", state.search_query);
     let block = Block::default()
-        .title("Search models")
+        .title(Span::styled(
+            " Search models ",
+            Style::default().fg(SEARCH_ACCENT).add_modifier(Modifier::BOLD),
+        ))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
-    frame.render_widget(Paragraph::new(text).block(block), area);
+        .border_style(Style::default().fg(SEARCH_ACCENT).add_modifier(Modifier::BOLD));
+    frame.render_widget(
+        Paragraph::new(Span::styled(text, Style::default().fg(Color::White))).block(block),
+        area,
+    );
 }
 
 fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
@@ -214,10 +295,17 @@ fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
         _ => input.clone(),
     };
     let block = Block::default()
-        .title(format!("{title} ({provider})"))
-        .borders(Borders::ALL);
+        .title(Span::styled(
+            format!(" {title} ({provider}) "),
+            Style::default().fg(HEADER_ACCENT).add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(HEADER_ACCENT).add_modifier(Modifier::BOLD));
     frame.render_widget(Clear, popup);
-    frame.render_widget(Paragraph::new(masked).block(block), popup);
+    frame.render_widget(
+        Paragraph::new(Span::styled(masked, Style::default().fg(Color::White))).block(block),
+        popup,
+    );
 }
 
 #[cfg(test)]
@@ -465,5 +553,73 @@ mod tests {
         assert_eq!(format_context_tokens(8_192), "8.2K");
         assert_eq!(format_context_tokens(500), "500");
         assert_eq!(format_context_tokens(1_999_999), "2M"); // carries into the whole part
+    }
+
+    #[test]
+    fn focused_panel_border_and_selection_use_the_accent_palette() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "openrouter".to_string(),
+            Provider {
+                base_url: "https://openrouter.example.com".to_string(),
+                api_key: "key".to_string(),
+                models: vec!["model-a".to_string()],
+                ..Default::default()
+            },
+        );
+        let state = AppState::new(Config { providers }, &Last::default());
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &state)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        // Providers panel is focused by default: its top-left border corner
+        // (row 3, right under the status bar) must use the Cyan accent, not
+        // a plain/default style.
+        let border_cell = buffer.cell((0, 3)).unwrap();
+        assert_eq!(border_cell.style().fg, Some(Color::Cyan));
+
+        // The selected provider row (row 4, first list item) must use the
+        // yellow-on-black selection style since its panel has focus.
+        let selected_cell = buffer.cell((1, 4)).unwrap();
+        assert_eq!(selected_cell.style().bg, Some(Color::Yellow));
+    }
+
+    #[test]
+    fn status_bar_uses_the_header_accent_and_colors_on_off_state() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "a".to_string(),
+            Provider {
+                base_url: "https://a.example.com".to_string(),
+                api_key: "key".to_string(),
+                models: vec!["m1".to_string()],
+                ..Default::default()
+            },
+        );
+        let last = Last { rtk_enabled: true, ..Default::default() };
+        let state = AppState::new(Config { providers }, &last);
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &state)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        assert!(content.contains("RTK: ON"));
+
+        // Find the cell holding the 'O' of the RTK "ON" value and confirm it
+        // renders in green, distinct from the muted label text next to it.
+        // Per-cell symbols, not a joined String: the border glyph is
+        // multi-byte UTF-8, so String::find's byte offset wouldn't line up
+        // with the column index cell() expects.
+        let cols: Vec<&str> = (0..80).map(|x| buffer.cell((x, 1)).unwrap().symbol()).collect();
+        let on_col = cols
+            .windows(2)
+            .position(|w| w == ["O", "N"])
+            .expect("RTK ON value should be on the status row") as u16;
+        let on_cell = buffer.cell((on_col, 1)).unwrap();
+        assert_eq!(on_cell.style().fg, Some(Color::Green));
     }
 }
