@@ -331,6 +331,7 @@ mod tests {
                     base_url: format!("https://{name}.example.com"),
                     api_key: "key".to_string(),
                     models: models.iter().map(|m| m.to_string()).collect(),
+                    ..Default::default()
                 },
             );
         }

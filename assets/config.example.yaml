@@ -26,3 +26,14 @@ providers:
     api_key: ollama
     models:
       - llama3.1 # replace with the model identifier pulled in Ollama
+
+# Optional: tell Claude Code the real context window for a model it doesn't
+# recognize, so auto-compact doesn't kick in early (it otherwise assumes
+# 200k tokens for unknown models). Keyed by the exact model name above.
+#   deepseek:
+#     base_url: https://api.deepseek.com
+#     api_key: sk-REPLACE_ME
+#     models:
+#       - deepseek-v4-flash-0731
+#     context_windows:
+#       deepseek-v4-flash-0731: 1000000

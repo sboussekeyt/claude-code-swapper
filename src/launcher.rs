@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::process::Command;
 
-pub fn build_env(base_url: &str, api_key: &str) -> HashMap<String, String> {
+pub fn build_env(base_url: &str, api_key: &str, context_tokens: Option<u64>) -> HashMap<String, String> {
     // vars_os() (rather than vars()) avoids panicking if any inherited
     // environment variable is not valid UTF-8; a lossy conversion is a
     // pragmatic middle ground since callers need an owned String map.
@@ -11,6 +11,13 @@ pub fn build_env(base_url: &str, api_key: &str) -> HashMap<String, String> {
     env.insert("ANTHROPIC_BASE_URL".to_string(), base_url.to_string());
     env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
     env.insert("ANTHROPIC_API_KEY".to_string(), String::new());
+    // Claude Code assumes a 200k-token window for any model it doesn't
+    // recognize, which throttles auto-compact too early for larger-context
+    // models. A configured context_windows entry (see config::Provider)
+    // tells it the real size instead.
+    if let Some(tokens) = context_tokens {
+        env.insert("CLAUDE_CODE_MAX_CONTEXT_TOKENS".to_string(), tokens.to_string());
+    }
     env
 }
 
@@ -59,10 +66,17 @@ mod tests {
 
     #[test]
     fn build_env_sets_proxy_vars_and_clears_api_key() {
-        let env = build_env("https://openrouter.ai/api", "sk-or-test");
+        let env = build_env("https://openrouter.ai/api", "sk-or-test", None);
         assert_eq!(env["ANTHROPIC_BASE_URL"], "https://openrouter.ai/api");
         assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], "sk-or-test");
         assert_eq!(env["ANTHROPIC_API_KEY"], "");
+        assert!(!env.contains_key("CLAUDE_CODE_MAX_CONTEXT_TOKENS"));
+    }
+
+    #[test]
+    fn build_env_sets_max_context_tokens_when_provided() {
+        let env = build_env("https://openrouter.ai/api", "sk-or-test", Some(1_000_000));
+        assert_eq!(env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "1000000");
     }
 
     #[test]

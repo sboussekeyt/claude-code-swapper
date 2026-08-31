@@ -89,3 +89,10 @@ Models does too, so search state can never point at a stale list.
   the whole program.
 - Key events are filtered to `KeyEventKind::Press` — some terminals/platforms also emit
   `Release`/`Repeat` events, which must not double-fire actions.
+- `config::Provider.context_windows` (`IndexMap<String, u64>`, keyed by model name, empty by
+  default via `#[serde(default)]`) is looked up in `main.rs`'s `Action::Launch` arm and passed
+  to `launcher::build_env`, which sets `CLAUDE_CODE_MAX_CONTEXT_TOKENS` when present — works
+  around Claude Code assuming a 200k window for models it doesn't recognize by name. Only
+  applies to proxy-mode launches (native mode has no selected model to look up). `ui.rs`
+  renders a `[1M]`/`[200K]`-style suffix (`format_context_tokens`) next to any model that has
+  an entry.

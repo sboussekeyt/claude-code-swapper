@@ -91,10 +91,11 @@ fn main() {
             let provider = state.current_provider.clone().unwrap();
             let model = state.current_model.clone().unwrap();
             let provider_cfg = &state.config.providers[&provider];
+            let context_tokens = provider_cfg.context_windows.get(&model).copied();
             if state.rtk_enabled {
                 launcher::ensure_rtk_hook();
             }
-            let env = launcher::build_env(&provider_cfg.base_url, &provider_cfg.api_key);
+            let env = launcher::build_env(&provider_cfg.base_url, &provider_cfg.api_key, context_tokens);
             let mut cmd = launcher::build_command(Some(&model), state.auto_accept, &env);
             let err = cmd.exec();
             eprintln!("failed to launch claude: {err}");

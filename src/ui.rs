@@ -84,6 +84,10 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
     };
 
     let models_focused = state.focused_panel == Panel::Models;
+    let focused_context_windows = state
+        .focused_provider()
+        .and_then(|p| state.config.providers.get(p))
+        .map(|p| &p.context_windows);
     let model_items: Vec<ListItem> = state
         .models_for_focused_provider
         .iter()
@@ -94,7 +98,11 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
             } else {
                 Style::default()
             };
-            ListItem::new(Line::from(m.as_str())).style(style)
+            let label = match focused_context_windows.and_then(|w| w.get(m)) {
+                Some(tokens) => format!("{m}  [{}]", format_context_tokens(*tokens)),
+                None => m.clone(),
+            };
+            ListItem::new(Line::from(label)).style(style)
         })
         .collect();
     let models_border = panel_border_style(models_focused);
@@ -112,6 +120,16 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
 
     if let Some(search_area) = search_area {
         render_search_bar(frame, state, search_area);
+    }
+}
+
+fn format_context_tokens(tokens: u64) -> String {
+    if tokens > 0 && tokens.is_multiple_of(1_000_000) {
+        format!("{}M", tokens / 1_000_000)
+    } else if tokens > 0 && tokens.is_multiple_of(1_000) {
+        format!("{}K", tokens / 1_000)
+    } else {
+        tokens.to_string()
     }
 }
 
@@ -199,6 +217,7 @@ mod tests {
                 base_url: "http://localhost:1234".to_string(),
                 api_key: "lm-studio".to_string(),
                 models: vec!["local-model".to_string()],
+                ..Default::default()
             },
         );
         let state = AppState::new(Config { providers }, &Last::default());
@@ -218,6 +237,7 @@ mod tests {
                 base_url: "http://localhost:1234".to_string(),
                 api_key: "lm-studio".to_string(),
                 models: models.clone(),
+                ..Default::default()
             },
         );
         let mut state = AppState::new(Config { providers }, &Last::default());
@@ -261,6 +281,7 @@ mod tests {
                 base_url: "http://localhost:1234".to_string(),
                 api_key: "lm-studio".to_string(),
                 models,
+                ..Default::default()
             },
         );
         let mut state = AppState::new(Config { providers }, &Last::default());
@@ -292,6 +313,7 @@ mod tests {
                 base_url: "http://localhost:1234".to_string(),
                 api_key: "lm-studio".to_string(),
                 models: vec!["local-model".to_string()],
+                ..Default::default()
             },
         );
         let state = AppState::new(Config { providers }, &Last::default());
@@ -314,6 +336,7 @@ mod tests {
                 base_url: "https://openrouter.example.com".to_string(),
                 api_key: "key".to_string(),
                 models: vec!["anthropic/claude".to_string(), "meta/llama".to_string()],
+                ..Default::default()
             },
         );
         let mut state = AppState::new(Config { providers }, &Last::default());
@@ -346,6 +369,7 @@ mod tests {
                 base_url: "https://a.example.com".to_string(),
                 api_key: "key".to_string(),
                 models: vec!["m1".to_string()],
+                ..Default::default()
             },
         );
         let mut state = AppState::new(Config { providers }, &Last::default());
@@ -368,6 +392,7 @@ mod tests {
                 base_url: "http://localhost:1234".to_string(),
                 api_key: "lm-studio".to_string(),
                 models: vec!["local-model".to_string()],
+                ..Default::default()
             },
         );
         let mut state = AppState::new(Config { providers }, &Last::default());
@@ -380,5 +405,30 @@ mod tests {
         let buffer = terminal.backend().buffer();
         let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
         assert!(content.contains("something happened"));
+    }
+
+    #[test]
+    fn render_shows_configured_context_window_next_to_the_model_name() {
+        let mut context_windows = IndexMap::new();
+        context_windows.insert("deepseek/deepseek-v4-flash-0731".to_string(), 1_000_000u64);
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "openrouter".to_string(),
+            Provider {
+                base_url: "https://openrouter.example.com".to_string(),
+                api_key: "key".to_string(),
+                models: vec!["deepseek/deepseek-v4-flash-0731".to_string(), "other/model".to_string()],
+                context_windows,
+            },
+        );
+        let state = AppState::new(Config { providers }, &Last::default());
+
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &state)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        assert!(content.contains("[1M]"), "expected the configured context window to render as a suffix");
     }
 }

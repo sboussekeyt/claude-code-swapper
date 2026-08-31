@@ -59,6 +59,23 @@ Adding a new provider = adding a new block. No code changes needed. This also co
 
 **`base_url` must NOT include a trailing `/v1`.** Claude Code appends `/v1/messages` itself; if `base_url` already ends in `/v1` you get a `/v1/v1/messages` request, which most providers won't recognize (LM Studio silently returns a malformed 200 for it, which shows up as `API Error: ... not a Message`).
 
+### Context window for unrecognized models
+
+Claude Code assumes a 200k-token context window for any model it doesn't recognize by name, which makes auto-compact trigger too early for models with a larger real window (e.g. a 1M-token model). Declare the real size per model under an optional `context_windows` map on the provider:
+
+```yaml
+providers:
+  openrouter:
+    base_url: https://openrouter.ai/api
+    api_key: sk-or-YOUR_KEY
+    models:
+      - deepseek/deepseek-v4-flash-0731
+    context_windows:
+      deepseek/deepseek-v4-flash-0731: 1000000
+```
+
+When you launch a model listed here, `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is set to that value automatically, and the Models panel shows a `[1M]`/`[200K]`-style suffix next to it. Models without an entry are unaffected — Claude Code falls back to its own detection (or the 200k default). This only applies to proxy-mode launches (`l`); native mode (`n`) uses your own Claude Code config as-is.
+
 ## RTK
 
 [RTK](https://www.rtk-ai.app) compresses command output before it reaches Claude's context, cutting token usage. If it's not installed, claude-code-swapper offers to install it on startup. When RTK mode is on, `rtk init --global --auto-patch` is run automatically before every proxy-mode Claude launch, to keep the hook active.

@@ -3,11 +3,16 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Provider {
     pub base_url: String,
     pub api_key: String,
     pub models: Vec<String>,
+    /// Optional per-model context window override, keyed by model name.
+    /// Absent/unlisted models fall back to Claude Code's own detection.
+    /// Set at launch via CLAUDE_CODE_MAX_CONTEXT_TOKENS (see launcher.rs).
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub context_windows: IndexMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -159,6 +164,8 @@ providers:
     fn save_config_round_trips() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("config.yaml");
+        let mut context_windows = IndexMap::new();
+        context_windows.insert("model-a".to_string(), 1_000_000u64);
         let mut providers = IndexMap::new();
         providers.insert(
             "openrouter".to_string(),
@@ -166,6 +173,7 @@ providers:
                 base_url: "https://openrouter.ai/api".to_string(),
                 api_key: "sk-or-test".to_string(),
                 models: vec!["model-a".to_string()],
+                context_windows,
             },
         );
         let config = Config { providers };
