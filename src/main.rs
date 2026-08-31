@@ -6,7 +6,7 @@ mod launcher;
 mod ui;
 
 use app::AppState;
-use crossterm::event::Event;
+use crossterm::event::{Event, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
@@ -51,16 +51,16 @@ fn main() {
     let mut state = AppState::new(cfg, &last);
     event::refresh_discovery(&mut state);
 
-    enable_raw_mode().expect("failed to enable raw mode");
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen).expect("failed to enter alternate screen");
-
     let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
         default_panic(info);
     }));
+
+    enable_raw_mode().expect("failed to enable raw mode");
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen).expect("failed to enter alternate screen");
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).expect("failed to create terminal");
@@ -71,6 +71,9 @@ fn main() {
         let Event::Key(key) = event::crossterm_read() else {
             continue;
         };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
         match event::handle_key(&mut state, key, &config_path, &last_path) {
             event::Action::Continue => {}
             action @ (event::Action::Launch | event::Action::LaunchNative | event::Action::Quit) => {
@@ -101,7 +104,12 @@ fn main() {
             if state.rtk_enabled {
                 launcher::ensure_rtk_hook();
             }
-            let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+            // vars_os() (rather than vars()) avoids panicking if any inherited
+            // environment variable is not valid UTF-8; a lossy conversion here
+            // is a pragmatic middle ground since Command::envs needs owned Strings.
+            let env: std::collections::HashMap<String, String> = std::env::vars_os()
+                .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+                .collect();
             let mut cmd = launcher::build_command(None, state.auto_accept, &env);
             let err = cmd.exec();
             eprintln!("failed to launch claude: {err}");

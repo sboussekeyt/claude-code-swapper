@@ -20,3 +20,9 @@ providers:
     api_key: lm-studio
     models:
       - local-model # replace with the model identifier loaded in LM Studio
+
+  ollama:
+    base_url: http://localhost:11434 # no trailing /v1 — claude appends /v1/messages itself
+    api_key: ollama
+    models:
+      - llama3.1 # replace with the model identifier pulled in Ollama

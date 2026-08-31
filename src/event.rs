@@ -2,9 +2,7 @@ use crate::app::AppState;
 use crate::config;
 use crate::config::Last;
 use crate::discovery;
-use crossterm::event::{self, Event, KeyCode, KeyEvent};
-#[cfg(test)]
-use crossterm::event::KeyModifiers;
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use std::path::Path;
 use std::time::Duration;
 
@@ -38,9 +36,18 @@ pub fn refresh_discovery(state: &mut AppState) {
 }
 
 pub fn handle_key(state: &mut AppState, key: KeyEvent, config_path: &Path, last_path: &Path) -> Action {
+    state.status_message = None;
+
+    // Ctrl+C always means "quit"/"cancel", whether or not a modal is open.
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return Action::Quit;
+    }
+
     if state.modal.is_some() {
         match key.code {
-            KeyCode::Char(c) => state.modal_input_char(c),
+            KeyCode::Char(c) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+                state.modal_input_char(c)
+            }
             KeyCode::Backspace => state.modal_backspace(),
             KeyCode::Enter => {
                 state.confirm_modal();
@@ -52,42 +59,47 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent, config_path: &Path, last_
         return Action::Continue;
     }
 
-    match key.code {
-        KeyCode::Tab => state.switch_focus(),
-        KeyCode::Up => {
+    match (key.code, key.modifiers) {
+        (KeyCode::Tab, _) => state.switch_focus(),
+        (KeyCode::Up, _) => {
             state.move_cursor(-1);
             if state.focused_panel == crate::app::Panel::Providers {
                 refresh_discovery(state);
             }
         }
-        KeyCode::Down => {
+        (KeyCode::Down, _) => {
             state.move_cursor(1);
             if state.focused_panel == crate::app::Panel::Providers {
                 refresh_discovery(state);
             }
         }
-        KeyCode::Char('a') => state.open_add_model_modal(),
-        KeyCode::Char('x') => {
+        (KeyCode::Char('a'), KeyModifiers::NONE) => state.open_add_model_modal(),
+        (KeyCode::Char('x'), KeyModifiers::NONE) => {
             state.remove_focused_model();
             config::save_config(&state.config, config_path);
         }
-        KeyCode::Char('s') => state.open_set_api_key_modal(),
-        KeyCode::Char('r') => {
+        (KeyCode::Char('s'), KeyModifiers::NONE) => state.open_set_api_key_modal(),
+        (KeyCode::Char('r'), KeyModifiers::NONE) => {
             state.toggle_rtk();
             save_current_last(state, last_path);
         }
-        KeyCode::Char('p') => {
+        (KeyCode::Char('p'), KeyModifiers::NONE) => {
             state.toggle_auto_accept();
             save_current_last(state, last_path);
         }
-        KeyCode::Enter => {
+        (KeyCode::Enter, _) => {
             if state.apply_selection() {
                 save_current_last(state, last_path);
             }
         }
-        KeyCode::Char('l') if state.can_launch() => return Action::Launch,
-        KeyCode::Char('n') => return Action::LaunchNative,
-        KeyCode::Char('q') | KeyCode::Esc => return Action::Quit,
+        (KeyCode::Char('l'), KeyModifiers::NONE) => {
+            if state.can_launch() {
+                return Action::Launch;
+            }
+            state.status_message = Some("No model selected — press Enter to select one first".to_string());
+        }
+        (KeyCode::Char('n'), KeyModifiers::NONE) => return Action::LaunchNative,
+        (KeyCode::Char('q'), KeyModifiers::NONE) | (KeyCode::Esc, _) => return Action::Quit,
         _ => {}
     }
     Action::Continue
@@ -106,6 +118,11 @@ fn save_current_last(state: &AppState, last_path: &Path) {
 #[cfg(test)]
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+#[cfg(test)]
+fn key_with(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+    KeyEvent::new(code, modifiers)
 }
 
 #[cfg(test)]
@@ -239,6 +256,85 @@ mod tests {
         handle_key(&mut state, key(KeyCode::Enter), &config_path, &last_path);
 
         assert_eq!(state.config.providers["a"].models, vec!["m1", "m2q"]);
+    }
+
+    #[test]
+    fn ctrl_x_does_not_remove_model() {
+        let mut state = state_with(&[("a", &["m1", "m2"])]);
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("c.yaml");
+        let last_path = dir.path().join("l.yaml");
+
+        let action = handle_key(
+            &mut state,
+            key_with(KeyCode::Char('x'), KeyModifiers::CONTROL),
+            &config_path,
+            &last_path,
+        );
+
+        assert!(matches!(action, Action::Continue));
+        assert_eq!(state.config.providers["a"].models, vec!["m1", "m2"]);
+    }
+
+    #[test]
+    fn ctrl_c_returns_quit_action() {
+        let mut state = state_with(&[("a", &["m1"])]);
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("c.yaml");
+        let last_path = dir.path().join("l.yaml");
+
+        let action = handle_key(
+            &mut state,
+            key_with(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            &config_path,
+            &last_path,
+        );
+        assert!(matches!(action, Action::Quit));
+    }
+
+    #[test]
+    fn ctrl_c_returns_quit_action_even_with_modal_open() {
+        let mut state = state_with(&[("a", &["m1"])]);
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("c.yaml");
+        let last_path = dir.path().join("l.yaml");
+
+        handle_key(&mut state, key(KeyCode::Char('a')), &config_path, &last_path); // open add-model modal
+        let action = handle_key(
+            &mut state,
+            key_with(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            &config_path,
+            &last_path,
+        );
+        assert!(matches!(action, Action::Quit));
+    }
+
+    #[test]
+    fn ctrl_a_does_not_open_modal() {
+        let mut state = state_with(&[("a", &["m1"])]);
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("c.yaml");
+        let last_path = dir.path().join("l.yaml");
+
+        handle_key(
+            &mut state,
+            key_with(KeyCode::Char('a'), KeyModifiers::CONTROL),
+            &config_path,
+            &last_path,
+        );
+        assert_eq!(state.modal, None);
+    }
+
+    #[test]
+    fn l_without_selection_sets_status_message_instead_of_silent_noop() {
+        let mut state = state_with(&[("a", &["m1"])]);
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("c.yaml");
+        let last_path = dir.path().join("l.yaml");
+
+        let action = handle_key(&mut state, key(KeyCode::Char('l')), &config_path, &last_path);
+        assert!(matches!(action, Action::Continue));
+        assert!(state.status_message.is_some());
     }
 
     #[test]

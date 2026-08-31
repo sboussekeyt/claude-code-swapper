@@ -2,7 +2,7 @@ use crate::app::{AppState, Modal, Panel};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 pub fn render(frame: &mut Frame, state: &AppState) {
@@ -12,13 +12,13 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         .constraints([
             Constraint::Length(3),
             Constraint::Min(3),
-            Constraint::Length(1),
+            Constraint::Length(3),
         ])
         .split(area);
 
     render_status(frame, state, chunks[0]);
     render_panels(frame, state, chunks[1]);
-    render_footer(frame, chunks[2]);
+    render_footer(frame, state, chunks[2]);
 
     if let Some(modal) = &state.modal {
         render_modal(frame, modal, area);
@@ -117,9 +117,13 @@ fn cursor_style(panel_focused: bool) -> Style {
     }
 }
 
-fn render_footer(frame: &mut Frame, area: Rect) {
-    let text = "[Tab] switch  [↑/↓] move  [Enter] select  [l] launch  [n] native  [a] add  [x] remove  [s] api key  [r] rtk  [p] auto-accept  [q] quit";
-    frame.render_widget(Paragraph::new(text), area);
+fn render_footer(frame: &mut Frame, state: &AppState, area: Rect) {
+    let keys = "[Tab] switch  [↑/↓] move  [Enter] select  [l] launch  [n] native  [a] add  [x] remove  [s] api key  [r] rtk  [p] auto-accept  [q] quit";
+    let text = match &state.status_message {
+        Some(msg) => format!("{keys}\n[{msg}]"),
+        None => keys.to_string(),
+    };
+    frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), area);
 }
 
 fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
@@ -142,6 +146,7 @@ fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
     let block = Block::default()
         .title(format!("{title} ({provider})"))
         .borders(Borders::ALL);
+    frame.render_widget(Clear, popup);
     frame.render_widget(Paragraph::new(masked).block(block), popup);
 }
 
@@ -206,7 +211,62 @@ mod tests {
     }
 
     #[test]
-    fn render_with_open_modal_does_not_panic() {
+    fn render_with_open_modal_clears_area_beneath_it() {
+        // A model name wide/long enough that, if the modal didn't clear its
+        // background first, its glyphs would bleed through into the popup area.
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "lmstudio".to_string(),
+            Provider {
+                base_url: "http://localhost:1234".to_string(),
+                api_key: "lm-studio".to_string(),
+                models: vec!["ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ-bleed-marker".to_string()],
+            },
+        );
+        let mut state = AppState::new(Config { providers }, &Last::default());
+        state.open_add_model_modal();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &state)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        // The modal's own title/content must be present...
+        assert!(content.contains("Add model"));
+        // ...and the background model name must not bleed through the popup:
+        // it should be fully covered by the modal, so it shouldn't appear at all
+        // once the modal is the last thing rendered.
+        assert!(
+            !content.contains("bleed-marker"),
+            "expected Clear to blank the popup area so the model list underneath doesn't show through"
+        );
+    }
+
+    #[test]
+    fn footer_shows_quit_hint_on_narrow_terminal() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "lmstudio".to_string(),
+            Provider {
+                base_url: "http://localhost:1234".to_string(),
+                api_key: "lm-studio".to_string(),
+                models: vec!["local-model".to_string()],
+            },
+        );
+        let state = AppState::new(Config { providers }, &Last::default());
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &state)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        assert!(content.contains("quit"), "expected [q] quit to be visible even on an 80-column terminal");
+    }
+
+    #[test]
+    fn footer_renders_status_message_when_present() {
         let mut providers = IndexMap::new();
         providers.insert(
             "lmstudio".to_string(),
@@ -217,10 +277,14 @@ mod tests {
             },
         );
         let mut state = AppState::new(Config { providers }, &Last::default());
-        state.open_add_model_modal();
+        state.status_message = Some("something happened".to_string());
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(frame, &state)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        assert!(content.contains("something happened"));
     }
 }

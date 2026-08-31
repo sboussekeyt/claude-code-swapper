@@ -165,7 +165,6 @@ dependencies = [
  "indexmap",
  "ratatui",
  "serde",
- "serde_json",
  "serde_yaml_ng",
  "tempfile",
  "tiny_http",

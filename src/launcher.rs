@@ -2,7 +2,12 @@ use std::collections::HashMap;
 use std::process::Command;
 
 pub fn build_env(base_url: &str, api_key: &str) -> HashMap<String, String> {
-    let mut env: HashMap<String, String> = std::env::vars().collect();
+    // vars_os() (rather than vars()) avoids panicking if any inherited
+    // environment variable is not valid UTF-8; a lossy conversion is a
+    // pragmatic middle ground since callers need an owned String map.
+    let mut env: HashMap<String, String> = std::env::vars_os()
+        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+        .collect();
     env.insert("ANTHROPIC_BASE_URL".to_string(), base_url.to_string());
     env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
     env.insert("ANTHROPIC_API_KEY".to_string(), String::new());

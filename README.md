@@ -24,7 +24,8 @@ claude-code-swapper
 - `s` — set the API key for the focused provider
 - `r` — toggle RTK mode
 - `p` — toggle auto-accept mode (`--dangerously-skip-permissions`)
-- `q` / `Esc` — quit
+- `q` / `Esc` / `Ctrl+C` — quit
+- Inside a modal (add model / set API key): `Enter` confirm, `Esc` cancel, `Backspace` delete last character
 
 ## Config
 
@@ -58,7 +59,7 @@ Adding a new provider = adding a new block. No code changes needed. This also co
 
 ## RTK
 
-[RTK](https://www.rtk-ai.app) compresses command output before it reaches Claude's context, cutting token usage. If it's not installed, claude-code-swapper offers to install it on startup. Toggle RTK mode (`r`) to have it re-activate the RTK hook (`rtk init --global`) automatically before every Claude launch.
+[RTK](https://www.rtk-ai.app) compresses command output before it reaches Claude's context, cutting token usage. If it's not installed, claude-code-swapper offers to install it on startup. When RTK mode is on, `rtk init --global --auto-patch` is run automatically before every proxy-mode Claude launch, to keep the hook active.
 
 ## Dev install
 

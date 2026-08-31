@@ -18,6 +18,7 @@ pub struct AppState {
     pub provider_cursor: usize,
     pub model_cursor: usize,
     pub models_for_focused_provider: Vec<String>,
+    pub models_are_discovered: bool,
     pub current_provider: Option<String>,
     pub current_model: Option<String>,
     pub rtk_enabled: bool,
@@ -35,14 +36,22 @@ impl AppState {
             .as_ref()
             .and_then(|p| providers.iter().position(|x| x == p))
             .unwrap_or(0);
+        // Only trust last.yaml's provider/model if the provider still exists in
+        // the loaded config — the user may have hand-edited config.yaml to
+        // rename/remove a provider since the last run.
+        let (current_provider, current_model) = match &last.provider {
+            Some(p) if config.providers.contains_key(p) => (Some(p.clone()), last.model.clone()),
+            _ => (None, None),
+        };
         let mut state = AppState {
             providers,
             focused_panel: Panel::Providers,
             provider_cursor,
             model_cursor: 0,
             models_for_focused_provider: Vec::new(),
-            current_provider: last.provider.clone(),
-            current_model: last.model.clone(),
+            models_are_discovered: false,
+            current_provider,
+            current_model,
             rtk_enabled: last.rtk_enabled,
             auto_accept: last.auto_accept,
             config,
@@ -91,6 +100,7 @@ impl AppState {
             }
         }
         self.models_for_focused_provider = models;
+        self.models_are_discovered = true;
     }
 
     pub fn refresh_focused_provider_models(&mut self) {
@@ -99,7 +109,16 @@ impl AppState {
             .and_then(|p| self.config.providers.get(p))
             .map(|p| p.models.clone())
             .unwrap_or_default();
-        self.set_focused_provider_models(models);
+        self.model_cursor = 0;
+        if let Some(current) = &self.current_model {
+            if self.focused_provider() == self.current_provider.as_deref() {
+                if let Some(idx) = models.iter().position(|m| m == current) {
+                    self.model_cursor = idx;
+                }
+            }
+        }
+        self.models_for_focused_provider = models;
+        self.models_are_discovered = false;
     }
 
     pub fn apply_selection(&mut self) -> bool {
@@ -117,7 +136,10 @@ impl AppState {
     }
 
     pub fn can_launch(&self) -> bool {
-        self.current_provider.is_some() && self.current_model.is_some()
+        self.current_provider
+            .as_deref()
+            .is_some_and(|p| self.config.providers.contains_key(p))
+            && self.current_model.is_some()
     }
 
     pub fn add_model(&mut self, provider: &str, model_name: &str) -> bool {
@@ -129,15 +151,26 @@ impl AppState {
             return false;
         }
         p.models.push(model_name.to_string());
-        self.refresh_focused_provider_models();
+        if !self.models_are_discovered {
+            self.refresh_focused_provider_models();
+        }
         true
     }
 
     pub fn remove_model(&mut self, provider: &str, model_name: &str) {
+        let mut removed = false;
         if let Some(p) = self.config.providers.get_mut(provider) {
+            let before = p.models.len();
             p.models.retain(|m| m != model_name);
+            removed = p.models.len() != before;
         }
-        self.refresh_focused_provider_models();
+        if !self.models_are_discovered {
+            self.refresh_focused_provider_models();
+        } else if !removed {
+            self.status_message = Some(format!(
+                "'{model_name}' is discovered live and isn't in the static config, so nothing was removed."
+            ));
+        }
     }
 
     pub fn remove_focused_model(&mut self) {
@@ -210,7 +243,7 @@ impl AppState {
                 self.add_model(&provider, input.trim());
             }
             Some(Modal::SetApiKey { provider, input }) if !input.trim().is_empty() => {
-                self.set_api_key(&provider, &input);
+                self.set_api_key(&provider, input.trim());
             }
             _ => {}
         }
@@ -439,6 +472,35 @@ mod tests {
         state.open_add_model_modal();
         state.confirm_modal();
         assert_eq!(state.config.providers["a"].models, vec!["m1"]);
+    }
+
+    #[test]
+    fn new_drops_stale_provider_from_last_yaml_instead_of_panicking() {
+        let config = config_with(&[("openrouter", &["a"])]);
+        let last = Last {
+            provider: Some("removed-provider".to_string()),
+            model: Some("some-model".to_string()),
+            ..Default::default()
+        };
+        let state = AppState::new(config, &last);
+        assert_eq!(state.current_provider, None);
+        assert_eq!(state.current_model, None);
+        assert!(!state.can_launch());
+    }
+
+    #[test]
+    fn discovered_model_list_survives_add_and_remove_of_unrelated_static_model() {
+        let config = config_with(&[("a", &["static-model"])]);
+        let mut state = AppState::new(config, &Last::default());
+        let discovered = vec!["disc-1".to_string(), "disc-2".to_string(), "disc-3".to_string()];
+        state.set_focused_provider_models(discovered.clone());
+        assert!(state.models_are_discovered);
+
+        // Removing an item that isn't in the static config list should not
+        // collapse the discovered list back down to the static list.
+        state.remove_model("a", "disc-2");
+        assert_eq!(state.models_for_focused_provider, discovered);
+        assert!(state.status_message.is_some());
     }
 
     #[test]
