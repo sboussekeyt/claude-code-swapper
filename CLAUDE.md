@@ -1,69 +1,88 @@
-# claude-code-swapper
+# claude-code-swapper (Rust + TUI)
 
-CLI interactive (TUI) pour lancer Claude Code avec différents providers LLM (OpenRouter, Groq, etc.) via les variables d'environnement `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`.
+Full-screen `ratatui` TUI, single self-contained Rust binary, for launching Claude Code
+against different LLM providers (OpenRouter, Groq, LM Studio, Ollama, etc.) via
+`ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`. This is the Rust rewrite of the original
+Python `claude_code_swapper` package — the Python code has been (or will be) removed once
+this reaches parity.
 
 ## Commands
 
 ```bash
-# Installer en mode développement
-pip install -e .
-
-# Lancer l'outil
-claude-code-swapper
-
-# Tests
-pytest
-
-# Tests avec verbose
-pytest -v
+cargo build --release   # build the binary (target/release/claude-code-swapper)
+cargo test               # run the full test suite
+cargo clippy --all-targets   # lint
+cargo install --path .   # install for personal use
 ```
 
-## Architecture
+## Modules (`src/`)
 
-```
-claude_code_swapper/
-  main.py               # Tout le code (config, menu, launch)
-  config.example.yaml   # Template copié au premier lancement
-tests/
-  test_main.py          # Suite de tests complète
-```
+| Module | Responsibility |
+|---|---|
+| `config.rs` | Load/save `config.yaml` + `last.yaml`; bootstraps `config.yaml` from `assets/config.example.yaml` on first run |
+| `discovery.rs` | `fetch_remote_models` — `GET {base_url}/v1/models` via `ureq`, 1.5s timeout, silent fallback on any failure |
+| `launcher.rs` | `build_env`/`build_command`, `check_claude`, RTK install/hook helpers — all process/PATH I/O |
+| `app.rs` | `AppState` and all state transitions — pure, no I/O, no terminal handle |
+| `ui.rs` | `ratatui` rendering — pure functions of `AppState` -> widgets |
+| `event.rs` | Translates crossterm key events into `AppState` mutations / `Action`s |
+| `main.rs` | Wiring only: load config, terminal setup/teardown, panic hook, main loop, `exec()` into `claude` |
 
-- **Config** : `~/.config/claude-code-swapper/config.yaml` (providers + api_keys + models)
-- **État persistant** : `~/.config/claude-code-swapper/last.yaml` (dernier provider/model/options)
-- Premier lancement sans config → copie `config.example.yaml` et exit
+## Global constraints
 
-## Modes de lancement
+- All I/O (filesystem, network, process spawn, terminal) is confined to `main.rs`, `event.rs`,
+  `launcher.rs`, `config.rs`, and `discovery.rs`.
+- `app.rs` stays pure: no I/O, no terminal handle, only state transitions — this is what makes
+  it unit-testable without a terminal or mocks.
 
-| Mode | Description |
-|------|-------------|
-| **Launch** | Lance Claude via proxy (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN) |
-| **Launch (native)** | Lance `claude` sans override d'env (`os.environ` inchangé, pas de `--model`) — utilise la config/login natif de Claude Code |
+## Config paths
 
-### Proxy
+- `~/.config/claude-code-swapper/config.yaml` (providers + api_keys + models)
+- `~/.config/claude-code-swapper/last.yaml` (last provider/model/RTK/auto-accept)
 
-Tous les providers de la config sont traités en mode proxy : `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY=""`.
+Resolved via `dirs::home_dir()` joined with `.config/claude-code-swapper`, **not**
+`dirs::config_dir()` — on macOS `dirs::config_dir()` resolves to
+`~/Library/Application Support`, which is not where this tool's config lives (matches the
+Python original's `Path.home() / ".config" / ...`).
 
-### Native
+## Keybindings
 
-`launch_claude_native()` ne touche à aucune variable `ANTHROPIC_*` et n'ajoute pas `--model` : Claude Code se comporte comme s'il était lancé directement (compte/API key natifs). Les toggles RTK et auto-accept restent appliqués.
+| Key | Action |
+|---|---|
+| `Tab` | Switch focus between Providers and Models panels |
+| `↑` / `↓` | Move cursor in the focused panel (also re-runs model discovery when moving in Providers) |
+| `Enter` | Apply the focused provider+model as current selection, persists `last.yaml` |
+| `l` | Launch Claude (proxy mode) |
+| `n` | Launch Claude (native mode — no env override, no `--model`) |
+| `a` | Add a model to the focused provider (opens modal) |
+| `x` | Remove the focused model |
+| `s` | Set API key for the focused provider (opens masked modal) |
+| `r` | Toggle RTK mode |
+| `p` | Toggle auto-accept mode (`--dangerously-skip-permissions`) |
+| `q` / `Esc` / `Ctrl+C` | Quit |
+| (modal open) `Enter` / `Esc` / `Backspace` | Confirm / cancel / delete-last-char |
 
-## RTK
-
-[RTK](https://www.rtk-ai.app) compresse les sorties de commandes avant qu'elles n'atteignent le contexte de Claude, pour réduire la conso de tokens. Pas de démon : c'est un hook (`PreToolUse`) activé via `rtk init --global`.
-
-- Au lancement de `claude-code-swapper`, si `rtk` n'est pas dans le PATH, `prompt_rtk_install()` propose de l'installer (script officiel via `curl | sh`)
-- `MENU_TOGGLE_RTK` bascule `last["rtk_enabled"]`
-- Si activé, `ensure_rtk_hook()` relance `rtk init --global` avant **chaque** lancement de `claude` (dans `launch_claude()`), pour garantir que le hook reste actif
-
-## Découverte de modèles
-
-`fetch_remote_models(base_url, api_key)` interroge `{base_url}/v1/models` (format OpenAI, header `Authorization: Bearer`) pour lister les modèles réellement disponibles chez un provider local/OpenAI-compatible (LM Studio, Ollama...). En cas d'échec (serveur injoignable, timeout, JSON invalide) → retourne `None` silencieusement, et `select_provider_and_model` retombe sur la liste statique `models:` du config.yaml.
+Ctrl-modified letter keys (`Ctrl+X`, `Ctrl+A`, `Ctrl+L`, etc.) are intentionally inert —
+only the plain, unmodified key fires the action, so accidental chords can't trigger
+destructive operations (e.g. `Ctrl+X` does not delete a model).
 
 ## Gotchas
 
-- **`base_url` ne doit JAMAIS inclure `/v1` en suffixe.** `claude` ajoute lui-même `/v1/messages` à `ANTHROPIC_BASE_URL`. Un `base_url` du style `http://localhost:1234/v1` produit donc `POST /v1/v1/messages` — la plupart des serveurs (dont LM Studio) répondent 200 avec un JSON invalide plutôt qu'une 404 propre, ce qui remonte côté Claude Code comme "API returned an empty or malformed response" / "not a Message". Toujours utiliser la racine du provider (ex: `http://localhost:1234`, pas `http://localhost:1234/v1`).
-- `os.execvpe` remplace le processus courant → pas de retour possible après `launch_claude()`
-- `auto_accept` passe `--dangerously-skip-permissions` à Claude
-- Les tests mockent `questionary.select/text/password/confirm` via `unittest.mock.patch`
-- Les tests qui appellent `main()` doivent mocker `claude_code_swapper.main.check_rtk_installed` (sinon `prompt_rtk_install()` fait un vrai `shutil.which` + un `questionary.confirm` non mocké)
-- Tous les chemins de config sont passés en paramètre aux fonctions (testabilité avec `tmp_path`)
+- **`base_url` must NOT include a trailing `/v1`.** `claude` appends `/v1/messages` itself;
+  a `base_url` ending in `/v1` produces `/v1/v1/messages`, which most providers (including
+  LM Studio) answer with a malformed 200 rather than a clean 404.
+- `Command::exec()` (via `std::os::unix::process::CommandExt`) replaces the current process —
+  there's no return from a successful launch. Unix-only, matches the previous
+  `os.execvpe` behavior.
+- The custom panic hook is installed **before** `enable_raw_mode()`/`EnterAlternateScreen`,
+  so a panic during terminal setup itself still restores the terminal.
+- Environment variables are read via `std::env::vars_os()` + lossy UTF-8 conversion rather
+  than `std::env::vars()`, so a non-UTF-8 value in the inherited environment can't panic
+  the whole program.
+- Key events are filtered to `KeyEventKind::Press` — some terminals/platforms also emit
+  `Release`/`Repeat` events, which must not double-fire actions.
+
+## Merge note
+
+This file does not exist on `main` yet — `main`'s `CLAUDE.md` documents the now-superseded
+Python implementation. Expect a real conflict when this branch merges; reconcile by keeping
+this Rust-focused version (the Python package is being removed as part of the rewrite).
