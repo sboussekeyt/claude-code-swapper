@@ -124,12 +124,32 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
 }
 
 fn format_context_tokens(tokens: u64) -> String {
-    if tokens > 0 && tokens.is_multiple_of(1_000_000) {
-        format!("{}M", tokens / 1_000_000)
-    } else if tokens > 0 && tokens.is_multiple_of(1_000) {
-        format!("{}K", tokens / 1_000)
+    // Real-world context windows are often powers of two (1_048_576,
+    // 1_310_720) rather than round decimal multiples, so round to one
+    // decimal place instead of only special-casing exact multiples.
+    if tokens >= 1_000_000 {
+        format_rounded(tokens, 1_000_000, "M")
+    } else if tokens >= 1_000 {
+        format_rounded(tokens, 1_000, "K")
     } else {
         tokens.to_string()
+    }
+}
+
+fn format_rounded(tokens: u64, unit: u64, suffix: &str) -> String {
+    let mut whole = tokens / unit;
+    let remainder = tokens % unit;
+    // Round remainder/unit to the nearest tenth (not always up), carrying
+    // into the whole part if it rounds all the way up to the next unit.
+    let mut tenths = (remainder * 10 + unit / 2) / unit;
+    if tenths == 10 {
+        whole += 1;
+        tenths = 0;
+    }
+    if tenths == 0 {
+        format!("{whole}{suffix}")
+    } else {
+        format!("{whole}.{tenths}{suffix}")
     }
 }
 
@@ -430,5 +450,20 @@ mod tests {
         let buffer = terminal.backend().buffer();
         let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
         assert!(content.contains("[1M]"), "expected the configured context window to render as a suffix");
+    }
+
+    #[test]
+    fn format_context_tokens_rounds_power_of_two_windows_to_one_decimal() {
+        // Real-world context windows are frequently powers of two, not
+        // round decimal multiples — these must round sensibly, not just
+        // special-case exact millions/thousands.
+        assert_eq!(format_context_tokens(1_048_576), "1M"); // 1.048576 -> rounds to 1.0
+        assert_eq!(format_context_tokens(1_310_720), "1.3M"); // 1.310720 -> rounds to 1.3
+        assert_eq!(format_context_tokens(1_000_000), "1M");
+        assert_eq!(format_context_tokens(163_840), "163.8K"); // 163.84 -> rounds to 163.8
+        assert_eq!(format_context_tokens(200_000), "200K");
+        assert_eq!(format_context_tokens(8_192), "8.2K");
+        assert_eq!(format_context_tokens(500), "500");
+        assert_eq!(format_context_tokens(1_999_999), "2M"); // carries into the whole part
     }
 }
