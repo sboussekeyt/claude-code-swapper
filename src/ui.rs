@@ -2,7 +2,7 @@ use crate::app::{AppState, Modal, Panel};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
 pub fn render(frame: &mut Frame, state: &AppState) {
@@ -61,7 +61,8 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
     } else {
         Style::default()
     };
-    frame.render_widget(
+    let mut provider_state = ListState::default().with_selected(Some(state.provider_cursor));
+    frame.render_stateful_widget(
         List::new(provider_items).block(
             Block::default()
                 .title("Providers")
@@ -69,6 +70,7 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
                 .border_style(providers_border),
         ),
         panels[0],
+        &mut provider_state,
     );
 
     let model_items: Vec<ListItem> = state
@@ -89,7 +91,8 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
     } else {
         Style::default()
     };
-    frame.render_widget(
+    let mut model_state = ListState::default().with_selected(Some(state.model_cursor));
+    frame.render_stateful_widget(
         List::new(model_items).block(
             Block::default()
                 .title("Models")
@@ -97,6 +100,7 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
                 .border_style(models_border),
         ),
         panels[1],
+        &mut model_state,
     );
 }
 
@@ -152,6 +156,40 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(frame, &state)).unwrap();
+    }
+
+    #[test]
+    fn render_scrolls_long_model_list_to_keep_cursor_visible() {
+        let mut providers = IndexMap::new();
+        let models: Vec<String> = (0..50).map(|i| format!("model-{i}")).collect();
+        providers.insert(
+            "lmstudio".to_string(),
+            Provider {
+                base_url: "http://localhost:1234".to_string(),
+                api_key: "lm-studio".to_string(),
+                models: models.clone(),
+            },
+        );
+        let mut state = AppState::new(Config { providers }, &Last::default());
+        state.switch_focus();
+        for _ in 0..49 {
+            state.move_cursor(1);
+        }
+        assert_eq!(state.model_cursor, 49);
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &state)).unwrap();
+
+        let content = terminal.backend().buffer().content.iter().map(|c| c.symbol()).collect::<String>();
+        assert!(
+            content.contains("model-49"),
+            "expected the selected last item to be scrolled into view"
+        );
+        assert!(
+            !content.contains("model-0 "),
+            "expected the first item to have scrolled out of view"
+        );
     }
 
     #[test]
