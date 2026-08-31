@@ -70,6 +70,19 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
         &mut provider_state,
     );
 
+    // While searching, carve a dedicated strip off the top of the Models
+    // column for the search bar rather than floating it over the list — an
+    // overlay would otherwise sit on top of (and hide) the very first result.
+    let (search_area, models_list_area) = if state.search_active {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(panels[1]);
+        (Some(rows[0]), rows[1])
+    } else {
+        (None, panels[1])
+    };
+
     let models_focused = state.focused_panel == Panel::Models;
     let model_items: Vec<ListItem> = state
         .models_for_focused_provider
@@ -85,22 +98,21 @@ fn render_panels(frame: &mut Frame, state: &AppState, area: Rect) {
         })
         .collect();
     let models_border = panel_border_style(models_focused);
-    let models_title = if state.search_active {
-        format!("Models — search: {}_", state.search_query)
-    } else {
-        "Models".to_string()
-    };
     let mut model_state = ListState::default().with_selected(Some(state.model_cursor));
     frame.render_stateful_widget(
         List::new(model_items).block(
             Block::default()
-                .title(models_title)
+                .title("Models")
                 .borders(Borders::ALL)
                 .border_style(models_border),
         ),
-        panels[1],
+        models_list_area,
         &mut model_state,
     );
+
+    if let Some(search_area) = search_area {
+        render_search_bar(frame, state, search_area);
+    }
 }
 
 fn panel_border_style(focused: bool) -> Style {
@@ -133,6 +145,17 @@ fn render_footer(frame: &mut Frame, state: &AppState, area: Rect) {
         }
     };
     frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), area);
+}
+
+fn render_search_bar(frame: &mut Frame, state: &AppState, area: Rect) {
+    // A dedicated strip carved out of the Models column (see render_panels),
+    // not an overlay — so the filtered list underneath is never obscured.
+    let text = format!("{}_", state.search_query);
+    let block = Block::default()
+        .title("Search models")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+    frame.render_widget(Paragraph::new(text).block(block), area);
 }
 
 fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
@@ -280,6 +303,60 @@ mod tests {
         let buffer = terminal.backend().buffer();
         let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
         assert!(content.contains("quit"), "expected [q] quit to be visible even on an 80-column terminal");
+    }
+
+    #[test]
+    fn render_with_active_search_does_not_panic_and_shows_the_search_popup() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "openrouter".to_string(),
+            Provider {
+                base_url: "https://openrouter.example.com".to_string(),
+                api_key: "key".to_string(),
+                models: vec!["anthropic/claude".to_string(), "meta/llama".to_string()],
+            },
+        );
+        let mut state = AppState::new(Config { providers }, &Last::default());
+        state.switch_focus();
+        state.start_search();
+        for c in "llama".chars() {
+            state.search_input_char(c);
+        }
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &state)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        assert!(content.contains("Search models"), "expected the search popup to be visible");
+        assert!(content.contains("llama_"), "expected the typed query to render in the popup");
+        assert!(
+            content.contains("meta/llama"),
+            "expected the filtered model list to still be visible behind the popup"
+        );
+    }
+
+    #[test]
+    fn render_with_search_on_tiny_terminal_does_not_panic() {
+        let mut providers = IndexMap::new();
+        providers.insert(
+            "a".to_string(),
+            Provider {
+                base_url: "https://a.example.com".to_string(),
+                api_key: "key".to_string(),
+                models: vec!["m1".to_string()],
+            },
+        );
+        let mut state = AppState::new(Config { providers }, &Last::default());
+        state.switch_focus();
+        state.start_search();
+
+        // Small enough that Percentage(40)/(60) splits and the popup's
+        // saturating-subtracted dimensions are exercised near their floor.
+        let backend = TestBackend::new(10, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &state)).unwrap();
     }
 
     #[test]
