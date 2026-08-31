@@ -1,45 +1,37 @@
 providers:
+  # Known providers (see known_providers.rs) only need an api_key — their
+  # base_url and discovery kind are built into the binary, so this whole
+  # file is short enough to share with a teammate as-is. Any field you set
+  # explicitly (base_url, kind, api_key) overrides the built-in default;
+  # models: is just a fallback shown before live discovery replaces it.
   openrouter:
-    base_url: https://openrouter.ai/api
     api_key: sk-or-REPLACE_ME
-    models:
-      - anthropic/claude-sonnet-4-6
-      - deepseek/deepseek-chat-v3-0324
-      - meta-llama/llama-3.1-8b-instruct
-      - mistralai/mistral-7b-instruct
 
   groq:
-    base_url: https://api.groq.com/openai
     api_key: gsk_REPLACE_ME
-    models:
-      - llama-3.1-8b-instant
-      - mixtral-8x7b-32768
 
-  lmstudio:
-    base_url: http://localhost:1234 # no trailing /v1 — claude appends /v1/messages itself
-    api_key: lm-studio
-    kind: lmstudio # uses LM Studio's native API to list every downloaded model + its context length
-    models:
-      - local-model # fallback only — live discovery replaces this once LM Studio is running
+  # LM Studio and Ollama don't check the API key at all, so they need
+  # nothing beyond the provider name — `{}` is an empty YAML mapping.
+  lmstudio: {}
+  ollama: {}
 
-  ollama:
-    base_url: http://localhost:11434 # no trailing /v1 — claude appends /v1/messages itself
-    api_key: ollama
-    kind: ollama # uses Ollama's native API to list every locally pulled model
-    models:
-      - llama3.1 # fallback only — live discovery replaces this once Ollama is running
+# Not every provider is built in — anything else needs its own full block:
+# base_url, api_key, and models: (or `kind:` to reuse LM Studio's/Ollama's
+# discovery strategy against a compatible server).
+#   glm:
+#     base_url: https://open.bigmodel.cn/api/paas/v4
+#     api_key: REPLACE_ME
+#     models:
+#       - glm-4.6
 
-# `kind` selects how a provider's available models are discovered (see
-# discovery.rs). Omit it (or leave unset) for any plain OpenAI-compatible
-# `/v1/models` endpoint — that's the default and covers OpenRouter, Groq,
-# and most hosted APIs. Only LM Studio and Ollama have a richer native API
-# worth pointing at explicitly.
+# `base_url` must NOT include a trailing /v1 — claude appends /v1/messages
+# itself.
 
 # Optional: tell Claude Code the real context window for a model it doesn't
 # recognize, so auto-compact doesn't kick in early (it otherwise assumes
 # 200k tokens for unknown models). Only needed as a fallback — OpenRouter and
 # LM Studio (kind: lmstudio) already report this automatically via discovery.
-# Keyed by the exact model name above.
+# Keyed by the exact model name.
 #   deepseek:
 #     base_url: https://api.deepseek.com
 #     api_key: sk-REPLACE_ME

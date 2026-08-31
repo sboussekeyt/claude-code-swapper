@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod discovery;
 mod event;
+mod known_providers;
 mod launcher;
 mod ui;
 

@@ -18,7 +18,8 @@ cargo install --path .   # install for personal use
 
 | Module | Responsibility |
 |---|---|
-| `config.rs` | Load/save `config.yaml` + `last.yaml`; bootstraps `config.yaml` from `assets/config.example.yaml` on first run |
+| `config.rs` | Load/save `config.yaml` + `last.yaml`; bootstraps `config.yaml` from `assets/config.example.yaml` on first run; merges a provider's config against `known_providers.rs` |
+| `known_providers.rs` | The built-in registry (`base_url`/`kind`/`default_api_key` per well-known provider name) so a config only needs to state what's actually the user's own — see Known providers below |
 | `discovery.rs` | `ProviderKind` (`Generic`/`LmStudio`/`Ollama`) + the `ModelSource` trait impls behind it — how each provider kind's available models are fetched (`ureq`, 1.5s timeout, silent fallback on any failure) |
 | `launcher.rs` | `build_env`/`build_command`, `check_claude`, RTK install/hook helpers — all process/PATH I/O |
 | `app.rs` | `AppState` and all state transitions — pure, no I/O, no terminal handle |
@@ -42,6 +43,29 @@ Resolved via `dirs::home_dir()` joined with `.config/claude-code-swapper`, **not
 `dirs::config_dir()` — on macOS `dirs::config_dir()` resolves to
 `~/Library/Application Support`, which is not where this tool's config lives (matches the
 Python original's `Path.home() / ".config" / ...`).
+
+## Known providers
+
+`config.rs` deserializes YAML into a private `RawProvider` (`base_url`/`kind` as `Option`,
+so "absent" is distinguishable from "explicitly set to the default") before resolving each
+one into the public `Provider` type everything else reads. `RawProvider::resolve(name)` looks
+`name` (the provider's key under `providers:`) up in `known_providers::KNOWN_PROVIDERS`: any
+field the user left unset is filled from there; anything the user did set always wins. This
+is what lets a config say just `openrouter: {api_key: ...}` or even `lmstudio: {}` instead of
+repeating a `base_url`/`kind` that's the same on every machine — the point being a config file
+you can hand to a teammate without them retyping infrastructure details, only their own key.
+
+Adding a provider to the built-in list is one `KnownProvider` entry (name, `base_url`, `kind`,
+optionally a `default_api_key` for services that don't check it, like LM Studio/Ollama) —
+nothing else changes. This is orthogonal to adding a new discovery *strategy*: a `kind` still
+needs a matching `ModelSource` impl in `discovery.rs` (see below) before a `KnownProvider` can
+reference it; `known_providers.rs` only supplies the connection details, not the fetch logic.
+
+Because `save_config` always serializes the fully-resolved `Provider` (not the raw/minimal
+form), any action that saves config (`a`/`x`/`s` in the TUI) will write the resolved
+`base_url`/`kind` back into the file on disk the first time it runs — a hand-written minimal
+config stays minimal only until then. That's an accepted trade-off: the value is a fast start
+for a new user or a config worth sharing, not a config that stays terse forever.
 
 ## Keybindings
 

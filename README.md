@@ -32,41 +32,48 @@ claude-code-swapper
 
 ## Config
 
-On first run, a config template is created at `~/.config/claude-code-swapper/config.yaml`. Edit it to add your API keys:
+On first run, a config template is created at `~/.config/claude-code-swapper/config.yaml`:
 
 ```yaml
 providers:
   openrouter:
-    base_url: https://openrouter.ai/api
-    api_key: sk-or-YOUR_KEY
-    models:
-      - anthropic/claude-sonnet-4-6
-      - meta-llama/llama-3.1-8b-instruct
+    api_key: sk-or-REPLACE_ME
 
-  lmstudio:
-    base_url: http://localhost:1234
-    api_key: lm-studio
-    kind: lmstudio
-    models:
-      - local-model
+  groq:
+    api_key: gsk_REPLACE_ME
 
-  ollama:
-    base_url: http://localhost:11434
-    api_key: ollama
-    kind: ollama
-    models:
-      - llama3.1
+  lmstudio: {}
+  ollama: {}
 ```
 
-Adding a new provider = adding a new block. No code changes needed. This also covers local servers like [LM Studio](https://lmstudio.ai) and [Ollama](https://ollama.com) — start the local server, then `models:` only needs to be a fallback (it's replaced live once discovery runs).
+That's the whole file — short enough to hand to a teammate as-is. `openrouter`, `groq`, `lmstudio`, and `ollama` are **known providers** (see `known_providers.rs`): their `base_url` and discovery strategy ship with the binary, so you only supply what's actually yours (an `api_key`) rather than typing out connection details that don't change from one machine to the next. LM Studio and Ollama don't check the key at all, so they need nothing beyond the provider name — `{}` is an empty YAML mapping.
 
-Moving the cursor onto a provider auto-discovers what's actually available. The optional `kind` field picks *how*:
+Any field you *do* set explicitly — `base_url`, `api_key`, `kind` — overrides the built-in default, so pointing at a self-hosted or non-default port still works:
+
+```yaml
+providers:
+  lmstudio:
+    base_url: http://192.168.1.50:1234 # a different machine on the LAN
+```
+
+A provider that isn't known needs its own full block, same as before:
+
+```yaml
+providers:
+  glm:
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    api_key: REPLACE_ME
+    models:
+      - glm-4.6
+```
+
+`models:` is only a fallback — moving the cursor onto a provider auto-discovers what's actually available and replaces it live. The optional `kind` field picks *how* discovery works for that provider:
 
 - Unset (default) — a plain OpenAI-compatible `{base_url}/v1/models`. Covers OpenRouter, Groq, and most hosted APIs.
 - `kind: lmstudio` — LM Studio's own richer API (`/api/v0/models`), which lists every **downloaded** model (not just the one currently loaded) along with its context length. Falls back to the plain `/v1/models` path automatically if that endpoint isn't available (older LM Studio versions).
 - `kind: ollama` — Ollama's own API (`/api/tags`), which lists every locally **pulled** model, not just whichever one Ollama currently has loaded into memory.
 
-Adding support for another provider's native API is a matter of implementing one small trait (`discovery::ModelSource`) and one new `ProviderKind` variant — see `CLAUDE.md` if you want to add one.
+Adding a new known provider is one entry in `known_providers.rs` (name, base_url, kind). Adding support for a new provider's *native discovery API* is one small trait impl (`discovery::ModelSource`) plus one new `ProviderKind` variant — see `CLAUDE.md` if you want to add one.
 
 **`base_url` must NOT include a trailing `/v1`.** Claude Code appends `/v1/messages` itself; if `base_url` already ends in `/v1` you get a `/v1/v1/messages` request, which most providers won't recognize (LM Studio silently returns a malformed 200 for it, which shows up as `API Error: ... not a Message`).
 
