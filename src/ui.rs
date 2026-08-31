@@ -538,6 +538,7 @@ mod tests {
                 api_key: "key".to_string(),
                 models: vec!["deepseek/deepseek-v4-flash-0731".to_string(), "other/model".to_string()],
                 context_windows,
+                ..Default::default()
             },
         );
         let state = AppState::new(Config { providers }, &Last::default());
@@ -563,6 +564,7 @@ mod tests {
                 api_key: "key".to_string(),
                 models: vec!["model-a".to_string()],
                 context_windows,
+                ..Default::default()
             },
         );
         let mut state = AppState::new(Config { providers }, &Last::default());

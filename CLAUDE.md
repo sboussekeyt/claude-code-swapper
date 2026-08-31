@@ -19,7 +19,7 @@ cargo install --path .   # install for personal use
 | Module | Responsibility |
 |---|---|
 | `config.rs` | Load/save `config.yaml` + `last.yaml`; bootstraps `config.yaml` from `assets/config.example.yaml` on first run |
-| `discovery.rs` | `fetch_remote_models` — `GET {base_url}/v1/models` via `ureq`, 1.5s timeout, silent fallback on any failure |
+| `discovery.rs` | `ProviderKind` (`Generic`/`LmStudio`/`Ollama`) + the `ModelSource` trait impls behind it — how each provider kind's available models are fetched (`ureq`, 1.5s timeout, silent fallback on any failure) |
 | `launcher.rs` | `build_env`/`build_command`, `check_claude`, RTK install/hook helpers — all process/PATH I/O |
 | `app.rs` | `AppState` and all state transitions — pure, no I/O, no terminal handle |
 | `ui.rs` | `ratatui` rendering — pure functions of `AppState` -> widgets |
@@ -90,11 +90,28 @@ Models does too, so search state can never point at a stale list.
   the whole program.
 - Key events are filtered to `KeyEventKind::Press` — some terminals/platforms also emit
   `Release`/`Repeat` events, which must not double-fire actions.
+- Model discovery is a trait, not a hardcoded call: `discovery::ModelSource` (`fn discover(&self,
+  base_url, api_key, timeout) -> Option<Vec<DiscoveredModel>>`) has one impl per
+  `discovery::ProviderKind` variant (`GenericOpenAi`, `LmStudioSource`, `OllamaSource`).
+  `config::Provider.kind` (`#[serde(default)]`, so existing configs default to `Generic`
+  unchanged) selects which one `event::refresh_discovery` calls via `cfg.kind.discover(...)`.
+  Adding a new provider kind is: one new `ModelSource` impl + one new `ProviderKind` variant +
+  one match arm in `ProviderKind::discover` — nothing else in `app.rs`/`event.rs`/`ui.rs`
+  changes, since they only ever see the resulting `Vec<DiscoveredModel>`.
+  - `GenericOpenAi` — plain `GET {base_url}/v1/models` (OpenRouter, Groq, most hosted APIs).
+    OpenRouter's response includes `context_length` even though it's not part of the strict
+    OpenAI schema; other generic providers just leave it absent.
+  - `LmStudioSource` — LM Studio's native `GET {base_url}/api/v0/models`, which reports every
+    *downloaded* model (not just the currently loaded one) plus `max_context_length`. Falls
+    back to `GenericOpenAi`'s `/v1/models` on any failure (network error, non-2xx, unparseable
+    JSON, or an empty result) — safe even if LM Studio's native schema changes or an older
+    version doesn't have that endpoint.
+  - `OllamaSource` — Ollama's native `GET {base_url}/api/tags`, which lists every locally
+    *pulled* model. No context length in that response, so it's always `None` for Ollama —
+    only a manual `config::Provider.context_windows` entry can set one.
 - Context window resolution works around Claude Code assuming a 200k window for models it
   doesn't recognize by name — two sources, discovered wins:
-  - `discovery::DiscoveredModel.context_length` — OpenRouter's `/v1/models` reports this field
-    even though it's not part of the strict OpenAI schema; providers that don't (LM Studio,
-    Ollama) just leave it `None`. `event::refresh_discovery` calls
+  - `discovery::DiscoveredModel.context_length` (see above). `event::refresh_discovery` calls
     `AppState::set_discovered_models`, which captures it into
     `AppState::discovered_context_windows` (`IndexMap<String, u64>`), reset by
     `replace_focused_provider_models` on every provider switch/re-discovery so it can't go

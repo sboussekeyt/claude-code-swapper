@@ -1,3 +1,4 @@
+use crate::discovery::ProviderKind;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -8,6 +9,13 @@ pub struct Provider {
     pub base_url: String,
     pub api_key: String,
     pub models: Vec<String>,
+    /// How to discover this provider's available models — see
+    /// `discovery::ProviderKind`. Defaults to `Generic` (a plain
+    /// OpenAI-compatible `/v1/models`), so existing configs need no change;
+    /// set `kind: lmstudio` / `kind: ollama` to use that provider's richer
+    /// native API instead.
+    #[serde(default)]
+    pub kind: ProviderKind,
     /// Optional per-model context window override, keyed by model name.
     /// Absent/unlisted models fall back to Claude Code's own detection.
     /// Set at launch via CLAUDE_CODE_MAX_CONTEXT_TOKENS (see launcher.rs).
@@ -150,6 +158,17 @@ providers:
         }
         assert!(path.exists());
         assert!(fs::read_to_string(&path).unwrap().contains("lmstudio"));
+
+        // The bundled example itself must actually parse (kind: lmstudio/
+        // ollama included) — not just exist on disk.
+        match load_config(&path) {
+            LoadConfigOutcome::Loaded(config) => {
+                assert_eq!(config.providers["lmstudio"].kind, ProviderKind::LmStudio);
+                assert_eq!(config.providers["ollama"].kind, ProviderKind::Ollama);
+                assert_eq!(config.providers["openrouter"].kind, ProviderKind::Generic);
+            }
+            _ => panic!("expected the bootstrapped example config to reload as Loaded"),
+        }
     }
 
     #[test]
@@ -178,6 +197,7 @@ providers:
                 api_key: "sk-or-test".to_string(),
                 models: vec!["model-a".to_string()],
                 context_windows,
+                ..Default::default()
             },
         );
         let config = Config { providers };

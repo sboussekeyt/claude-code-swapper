@@ -46,17 +46,27 @@ providers:
   lmstudio:
     base_url: http://localhost:1234
     api_key: lm-studio
+    kind: lmstudio
     models:
       - local-model
 
   ollama:
     base_url: http://localhost:11434
     api_key: ollama
+    kind: ollama
     models:
       - llama3.1
 ```
 
-Adding a new provider = adding a new block. No code changes needed. This also covers local servers like [LM Studio](https://lmstudio.ai) and [Ollama](https://ollama.com) — start the local server, then set `models` to whatever model identifier is loaded (`api_key` can be any non-empty string for these). Moving the cursor onto a provider also auto-discovers what's actually loaded via `{base_url}/v1/models` when the provider exposes it, falling back to the static `models:` list otherwise.
+Adding a new provider = adding a new block. No code changes needed. This also covers local servers like [LM Studio](https://lmstudio.ai) and [Ollama](https://ollama.com) — start the local server, then `models:` only needs to be a fallback (it's replaced live once discovery runs).
+
+Moving the cursor onto a provider auto-discovers what's actually available. The optional `kind` field picks *how*:
+
+- Unset (default) — a plain OpenAI-compatible `{base_url}/v1/models`. Covers OpenRouter, Groq, and most hosted APIs.
+- `kind: lmstudio` — LM Studio's own richer API (`/api/v0/models`), which lists every **downloaded** model (not just the one currently loaded) along with its context length. Falls back to the plain `/v1/models` path automatically if that endpoint isn't available (older LM Studio versions).
+- `kind: ollama` — Ollama's own API (`/api/tags`), which lists every locally **pulled** model, not just whichever one Ollama currently has loaded into memory.
+
+Adding support for another provider's native API is a matter of implementing one small trait (`discovery::ModelSource`) and one new `ProviderKind` variant — see `CLAUDE.md` if you want to add one.
 
 **`base_url` must NOT include a trailing `/v1`.** Claude Code appends `/v1/messages` itself; if `base_url` already ends in `/v1` you get a `/v1/v1/messages` request, which most providers won't recognize (LM Studio silently returns a malformed 200 for it, which shows up as `API Error: ... not a Message`).
 
@@ -64,9 +74,9 @@ Adding a new provider = adding a new block. No code changes needed. This also co
 
 Claude Code assumes a 200k-token context window for any model it doesn't recognize by name, which makes auto-compact trigger too early for models with a larger real window (e.g. a 1M-token model).
 
-**Auto-discovered (no config needed):** when a provider's `/v1/models` response includes `context_length` — OpenRouter's does — claude-code-swapper picks it up automatically every time you browse to that provider, no manual step required. The Models panel shows a `[1M]`/`[200K]`-style badge next to any model with a known window, and launching it (`l`) sets `CLAUDE_CODE_MAX_CONTEXT_TOKENS` for you.
+**Auto-discovered (no config needed):** OpenRouter's `/v1/models` and LM Studio's native API (`kind: lmstudio`) both report `context_length` — claude-code-swapper picks it up automatically every time you browse to that provider, no manual step required. The Models panel shows a `[1M]`/`[200K]`-style badge next to any model with a known window, and launching it (`l`) sets `CLAUDE_CODE_MAX_CONTEXT_TOKENS` for you.
 
-**Manual fallback:** for providers that don't report `context_length` in their `/v1/models` response (LM Studio, Ollama, and some direct provider APIs), declare it yourself under an optional `context_windows` map — it's only used when nothing was auto-discovered for that model:
+**Manual fallback:** for providers that don't report a context length (Ollama's `/api/tags` doesn't, Groq's `/v1/models` doesn't, some direct provider APIs don't), declare it yourself under an optional `context_windows` map — it's only used when nothing was auto-discovered for that model:
 
 ```yaml
 providers:

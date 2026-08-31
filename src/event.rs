@@ -1,7 +1,6 @@
 use crate::app::AppState;
 use crate::config;
 use crate::config::Last;
-use crate::discovery;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use std::path::Path;
 use std::time::Duration;
@@ -28,7 +27,7 @@ pub fn refresh_discovery(state: &mut AppState) {
     let Some(cfg) = state.config.providers.get(&provider) else {
         return;
     };
-    let discovered = discovery::fetch_remote_models(&cfg.base_url, &cfg.api_key, Duration::from_millis(1500));
+    let discovered = cfg.kind.discover(&cfg.base_url, &cfg.api_key, Duration::from_millis(1500));
     match discovered {
         Some(models) if !models.is_empty() => state.set_discovered_models(models),
         _ => state.refresh_focused_provider_models(),
